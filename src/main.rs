@@ -398,7 +398,12 @@ fn run() -> eframe::Result<()> {
         app.enable_quickchat_fork();
     }
     #[cfg(feature = "demo")]
-    if identity::QUICKCHAT && demo && (cli.quick || quick_query.is_some()) {
+    // A screenshot run must quit after its shot, not hide into a tray.
+    if identity::QUICKCHAT
+        && demo
+        && cli.demo_shot.is_none()
+        && (cli.quick || quick_query.is_some())
+    {
         app.enable_quickchat_demo_tray();
     }
     if cli.verbose {
@@ -412,13 +417,17 @@ fn run() -> eframe::Result<()> {
     }
     // The first launch owns the slot, so no verb reached a running copy and
     // the chat is opened here. The app drains its queue after the frame.
-    if let Some(query) = &quick_query {
-        app.quickchat.search_with_query(query);
-    } else if cli.quick {
-        app.quickchat.search();
+    if identity::QUICKCHAT {
+        if let Some(query) = &quick_query {
+            app.quickchat.search_with_query(query);
+        } else if cli.quick {
+            app.quickchat.search();
+        }
     }
     if let Some(request) = &target {
-        app.quickchat.panel();
+        if identity::QUICKCHAT {
+            app.quickchat.panel();
+        }
         app.actions.push(zapfast::model::Action::StartChat {
             name: request.display_name(),
             id: request.chat.clone(),
@@ -688,6 +697,11 @@ fn native_options(
     } else {
         geometry.apply(viewport)
     };
+    // An always-on-top launcher has nothing to minimize or zoom to the
+    // screen; its red button hides it.
+    let viewport = viewport
+        .with_minimize_button(!quick)
+        .with_maximize_button(!quick);
     let viewport = viewport
         // Keep the floor small enough that Windows can still snap the window
         // into narrow Aero Snap and LG Screen Split zones (a 2560 px ultrawide

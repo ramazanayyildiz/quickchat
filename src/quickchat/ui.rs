@@ -169,11 +169,19 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Hit, detail: &str, selected: 
         pos2(rect.left() + 20.0 + AVATAR / 2.0, rect.center().y),
         Vec2::splat(AVATAR),
     );
+    // Only chats ask WhatsApp for a picture, as the chat list does; a
+    // contact without one shows a picture only if it is already here.
     let picture = app
         .accounts
         .iter_mut()
         .find(|account| account.id == hit.account)
-        .and_then(|account| account.avatar(&hit.chat));
+        .and_then(|account| {
+            if hit.existing {
+                account.avatar(&hit.chat)
+            } else {
+                account.avatars.get(&hit.chat).cloned().flatten()
+            }
+        });
     widgets::paint_avatar(
         ui,
         &palette,
@@ -284,8 +292,7 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let response = search_bar(app, ui);
-            if std::mem::take(&mut app.quickchat.focus_search) || !response.has_focus() {
-                // Typing always lands in the field: nothing else here takes text.
+            if std::mem::take(&mut app.quickchat.focus_search) {
                 response.request_focus();
             }
             if response.changed() {

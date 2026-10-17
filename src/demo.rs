@@ -2999,6 +2999,11 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     pairing_phone: None,
                 };
             }
+            "quick-search" => {
+                // QuickChat's launcher, listing recent chats.
+                app.enable_quickchat_fork();
+                app.quickchat.search();
+            }
             "quick-panel" => {
                 // QuickChat's one-chat panel over the sample's first chat.
                 app.enable_quickchat_fork();
@@ -5864,6 +5869,20 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// QuickChat's launcher and panel lay out over the sample, at the
+    /// sizes their windows open at and the full window's.
+    #[test]
+    fn quickchat_surfaces_lay_out() {
+        for page in ["quick-search", "quick-search,light", "quick-panel"] {
+            let mut app = app();
+            let ctx = egui::Context::default();
+            app.attach(&ctx);
+            apply_flags(&mut app, Some(page));
+            render(&mut app, &ctx);
+            assert!(app.quickchat_compact(), "{page}");
         }
     }
 

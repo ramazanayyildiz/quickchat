@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 #[cfg(all(target_os = "macos", feature = "quickchat"))]
-mod dock;
+pub(crate) mod dock;
 mod hooks;
 #[cfg(all(target_os = "macos", feature = "quickchat"))]
 pub mod hotkey;

@@ -66,8 +66,15 @@ impl App {
     /// Keeps the Dock icon while, and only while, the full window is open.
     #[cfg(all(target_os = "macos", feature = "quickchat"))]
     pub(crate) fn sync_quickchat_dock(&self) {
+        use super::dock::Window;
         if self.fork_mode {
-            super::dock::sync(!self.window_hidden && !self.quickchat_compact());
+            super::dock::sync(if self.window_hidden {
+                Window::None
+            } else if self.quickchat_compact() {
+                Window::Compact
+            } else {
+                Window::Full
+            });
         }
     }
 

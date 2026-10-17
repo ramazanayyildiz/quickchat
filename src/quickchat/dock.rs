@@ -10,9 +10,26 @@ use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 /// 0 = not set yet, 1 = accessory, 2 = regular.
 static POLICY: AtomicU8 = AtomicU8::new(0);
 
-/// Shows the Dock icon while `full_window` is on screen, and hides it
-/// otherwise. Acts only on a change, on the main thread.
-pub fn sync(full_window: bool) {
+/// What is on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Window {
+    /// No window: a menu-bar utility.
+    None,
+    /// The launcher or the panel: the policy is left as it is, since
+    /// dropping the Dock icon under a key window takes its keyboard focus.
+    Compact,
+    /// The full window: an ordinary app, in the Dock and Cmd-Tab.
+    Full,
+}
+
+/// Shows the Dock icon with the full window and drops it with the last
+/// window. Acts only on a change, on the main thread.
+pub fn sync(window: Window) {
+    let full_window = match window {
+        Window::Full => true,
+        Window::None => false,
+        Window::Compact => return,
+    };
     let wanted = if full_window { 2 } else { 1 };
     if POLICY.load(Ordering::Relaxed) == wanted {
         return;
