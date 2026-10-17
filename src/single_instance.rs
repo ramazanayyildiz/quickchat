@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 /// Stable wire identity shared with FastsApp so upgrades surface a running
 /// older copy before migrating its session files. On the wire every request
-/// and reply starts with `fastsapp:`.
-const NAME: &str = "fastsapp";
+/// and reply starts with `fastsapp:`. QuickChat has a slot of its own.
+const NAME: &str = crate::identity::INSTANCE;
 const PREFIX: &str = "fastsapp:";
 /// What ZapFast answers a request it takes: `fastsapp:ok` on the wire.
 const OK: &str = "ok";
@@ -59,6 +59,12 @@ pub enum ControlCommand {
     OpenChat(crate::target::Request),
     /// Opens the invite dialog for the group a link named.
     OpenInvite(String),
+    /// Opens QuickChat's local, name-based search window.
+    QuickSearch,
+    /// Shows the original full conversation list and chat layout.
+    AllChats,
+    /// Prefills the local search field, never an outgoing message.
+    QuickSearchQuery(String),
 }
 
 type Queue = Arc<Mutex<Vec<ControlCommand>>>;
@@ -100,6 +106,14 @@ pub fn acquire(dir: &Path, waker: &crate::backend::Waker, verb: &str) -> Outcome
             return fall_back(verb, || matches!(send(dir, "show"), Sent::Taken));
         }
     };
+    // QuickChat has no older copies, and must never answer or surface
+    // ZapFast's legacy port.
+    if crate::identity::QUICKCHAT {
+        return Outcome::Only(Guard {
+            commands,
+            _claim: claim,
+        });
+    }
     // A copy from before the lock only knows `show` and `ping`. Anything else
     // asked of one surfaces its window rather than running a second ZapFast
     // beside it.
@@ -182,7 +196,10 @@ pub enum Sent {
 /// Sends one request to the running copy, without becoming it when there is
 /// none: for a command-line action that only makes sense while ZapFast runs.
 pub fn send(dir: &Path, verb: &str) -> Sent {
-    sent(slot(dir).send(verb).map(drop), legacy_instance_answers_ping)
+    // QuickChat has no older copies; ZapFast's legacy port is not its own.
+    sent(slot(dir).send(verb).map(drop), || {
+        !crate::identity::QUICKCHAT && legacy_instance_answers_ping()
+    })
 }
 
 /// Reads the result of a request. A copy from before the lock is asked
@@ -222,11 +239,38 @@ fn legacy_instance_answers_ping() -> bool {
         .is_ok()
 }
 
+/// Reject untrusted CLI/IPC text before it can become a search field.
+pub fn normalized_quick_query(query: &str) -> Option<String> {
+    let query = query.trim();
+    (!query.is_empty()
+        && query.chars().count() <= 96
+        && query.len() <= 384
+        && !query.chars().any(char::is_control))
+    .then(|| query.to_owned())
+}
+
+/// Percent-free JSON quoting prevents newline or delimiter injection in the
+/// one-line local instance protocol. No contact data ever goes to Raycast.
+pub fn quick_search_verb(query: &str) -> Option<String> {
+    let query = normalized_quick_query(query)?;
+    Some(format!(
+        "quick-search {}",
+        serde_json::to_string(&query).ok()?
+    ))
+}
+
 /// The verbs another launch may send. Anything else is declined.
 ///
 /// `open` carries the whole request, so it is read and held to the same rule
 /// [`crate::target::parse`] applies rather than being trusted as it arrives.
 fn parse(verb: &str) -> Option<ControlCommand> {
+    if let Some(encoded) = verb.strip_prefix("quick-search ") {
+        if encoded.len() > 600 {
+            return None;
+        }
+        let query: String = serde_json::from_str(encoded).ok()?;
+        return normalized_quick_query(&query).map(ControlCommand::QuickSearchQuery);
+    }
     if let Some(request) = verb.strip_prefix("open ") {
         return crate::target::Request::from_verb(request).map(ControlCommand::OpenChat);
     }
@@ -236,6 +280,8 @@ fn parse(verb: &str) -> Option<ControlCommand> {
         return crate::safety::group_invite_code(&url).map(ControlCommand::OpenInvite);
     }
     match verb {
+        "chats" => Some(ControlCommand::AllChats),
+        "quick" => Some(ControlCommand::QuickSearch),
         "show" => Some(ControlCommand::Show),
         "reload-themes" => Some(ControlCommand::ReloadThemes),
         "quit" => Some(ControlCommand::Quit),
@@ -357,6 +403,12 @@ mod tests {
     #[test]
     fn only_our_own_verbs_are_understood() {
         assert_eq!(parse("show"), Some(ControlCommand::Show));
+        assert_eq!(parse("chats"), Some(ControlCommand::AllChats));
+        assert_eq!(parse("quick"), Some(ControlCommand::QuickSearch));
+        assert_eq!(
+            parse(&quick_search_verb("  Ahmet Yılmaz  ").unwrap()),
+            Some(ControlCommand::QuickSearchQuery("Ahmet Yılmaz".into()))
+        );
         assert_eq!(parse("ping"), Some(ControlCommand::Ping));
         assert_eq!(parse("reload-themes"), Some(ControlCommand::ReloadThemes));
         assert_eq!(
@@ -386,6 +438,20 @@ mod tests {
         assert_eq!(parse("GET / HTTP/1.1"), None);
         assert_eq!(parse("frobnicate"), None);
         assert_eq!(parse(""), None);
+        // Untrusted local IPC never interprets a name as a send command,
+        // newline-delimited second command, or arbitrary unbounded text.
+        assert!(quick_search_verb("Ahmet\nshow").is_none());
+        assert!(quick_search_verb("  ").is_none());
+        assert!(quick_search_verb(&"a".repeat(97)).is_none());
+        assert_eq!(parse("quick-search \"Ahmet\nshow\""), None);
+        assert_eq!(parse("quick-search \"Ahmet\"\nshow"), None);
+        assert_eq!(parse("quick-search 123"), None);
+        assert_eq!(
+            parse(&quick_search_verb("O'Connor \"Satış\"").unwrap()),
+            Some(ControlCommand::QuickSearchQuery(
+                "O'Connor \"Satış\"".into()
+            ))
+        );
     }
 
     const INVITE: &str = "invite AbCdEf1234567890XyZ";
@@ -555,10 +621,13 @@ mod tests {
         ));
 
         // A launch of an older version.
-        assert_eq!(raw_request(&dir, "fastsapp:show", None), "fastsapp:ok\n");
         assert_eq!(
-            raw_request(&dir, "fastsapp:frobnicate", None),
-            "fastsapp!declined\n",
+            raw_request(&dir, &format!("{NAME}:show"), None),
+            format!("{NAME}:ok\n")
+        );
+        assert_eq!(
+            raw_request(&dir, &format!("{NAME}:frobnicate"), None),
+            format!("{NAME}!declined\n"),
             "which an older copy reads as no answer"
         );
         #[cfg(not(unix))]
@@ -639,5 +708,26 @@ mod tests {
             sent(Err(ErrorKind::TimedOut.into()), || unreachable!()),
             Sent::Failed(_)
         ));
+    }
+
+    #[test]
+    fn quick_search_verbs_reach_the_running_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let waker = crate::backend::Waker::default();
+        let queue = Queue::default();
+        let fastframe_instance::Claim::First(_owner) = claim(root.path(), "ping", &queue, &waker)
+        else {
+            panic!("a fresh folder has no running copy");
+        };
+        assert!(matches!(send(root.path(), "quick"), Sent::Taken));
+        let filtered = quick_search_verb("Proje Ekibi").unwrap();
+        assert!(matches!(send(root.path(), &filtered), Sent::Taken));
+        assert_eq!(
+            queue.lock().unwrap().as_slice(),
+            &[
+                ControlCommand::QuickSearch,
+                ControlCommand::QuickSearchQuery("Proje Ekibi".into()),
+            ]
+        );
     }
 }

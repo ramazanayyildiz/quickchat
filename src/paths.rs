@@ -20,15 +20,16 @@ pub struct AppDirs {
 
 impl AppDirs {
     pub fn discover() -> Self {
-        match Self::of("zapfast") {
+        let name = crate::identity::DIRS;
+        match Self::of(name) {
             Some(dirs) => dirs,
             None => {
                 let fallback = std::env::current_dir().unwrap_or_default();
                 Self {
-                    config: fallback.join("zapfast-config"),
-                    state: fallback.join("zapfast-state"),
-                    cache: fallback.join("zapfast-cache"),
-                    runtime: fallback.join("zapfast-run"),
+                    config: fallback.join(format!("{name}-config")),
+                    state: fallback.join(format!("{name}-state")),
+                    cache: fallback.join(format!("{name}-cache")),
+                    runtime: fallback.join(format!("{name}-run")),
                 }
             }
         }

@@ -29,7 +29,11 @@ pub(super) fn key_for(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     fs::create_dir_all(parent)?;
     let store = platform_store()?;
     let entry = store
-        .build("rocks.zapfast.ZapFast", &identity_for(parent)?, None)
+        .build(
+            crate::identity::KEYRING_SERVICE,
+            &identity_for(parent)?,
+            None,
+        )
         .map_err(keyring_error)
         .context("The OS keyring could not open ZapFast's archive key")?;
     key_from_entry(path, &entry)
@@ -62,7 +66,11 @@ fn copy_archive_key_in(
         return Ok(());
     }
     let old_entry = store
-        .build("rocks.zapfast.ZapFast", &identity_for(old_parent)?, None)
+        .build(
+            crate::identity::KEYRING_SERVICE,
+            &identity_for(old_parent)?,
+            None,
+        )
         .map_err(keyring_error)
         .context("The OS keyring could not open ZapFast's archive key")?;
     let key = match old_entry.get_secret() {
@@ -87,7 +95,11 @@ fn copy_archive_key_in(
         }
     };
     let new_entry = store
-        .build("rocks.zapfast.ZapFast", &identity_for(new_parent)?, None)
+        .build(
+            crate::identity::KEYRING_SERVICE,
+            &identity_for(new_parent)?,
+            None,
+        )
         .map_err(keyring_error)
         .context("The OS keyring could not open ZapFast's archive key")?;
     new_entry
@@ -112,7 +124,7 @@ fn copy_archive_key_in(
 /// such as a removed account's. Never call it while the archive exists.
 pub fn forget_archive_key(identity: &str) -> Result<()> {
     let entry = platform_store()?
-        .build("rocks.zapfast.ZapFast", identity, None)
+        .build(crate::identity::KEYRING_SERVICE, identity, None)
         .map_err(keyring_error)?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),

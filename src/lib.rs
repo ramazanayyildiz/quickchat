@@ -23,6 +23,7 @@ pub mod diagnostics;
 pub mod emoji;
 pub mod geo;
 pub mod i18n;
+pub mod identity;
 pub mod image_cache;
 pub mod image_preview;
 #[cfg(target_os = "macos")]
@@ -39,6 +40,7 @@ pub mod paths;
 pub mod privacy;
 pub mod proxy;
 pub mod qr;
+pub mod quickchat;
 pub mod safety;
 pub mod settings;
 pub mod single_instance;

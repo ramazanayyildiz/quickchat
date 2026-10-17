@@ -2225,6 +2225,8 @@ pub fn forward_limit(frequently_forwarded: bool) -> usize {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Open(Page),
+    /// Leave Quick Search/one-chat mode and show the full conversation list.
+    ShowAllChats,
     /// Opens settings, or closes them when they are already showing.
     ToggleSettings,
     /// Steps back to the previously visited page, chat, or dialog, as a

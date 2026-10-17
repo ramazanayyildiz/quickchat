@@ -761,8 +761,8 @@ pub struct App {
     /// Whether ZapFast starts at login, when this installation supports it.
     pub start_with_system: Option<bool>,
     /// Cross-thread window repaint handle.
-    waker: Waker,
-    tray: Option<fastframe_tray::Tray>,
+    pub(crate) waker: Waker,
+    pub(crate) tray: Option<fastframe_tray::Tray>,
     /// Sleep and wake as the system reports them. Tests and demo runs get a
     /// fixed one that reads nothing from the machine.
     power: fastframe_power::Power,
@@ -780,9 +780,15 @@ pub struct App {
     test_raised: bool,
     /// Whether the tray menu offers "Lock ZapFast": whether an app lock
     /// password was set when it last changed.
-    tray_lockable: bool,
+    pub(crate) tray_lockable: bool,
     /// Whether the app is running without a window.
     pub window_hidden: bool,
+    /// Ephemeral QuickChat launcher/panel state. No contacts or messages are persisted here.
+    pub quickchat: crate::quickchat::State,
+    /// QuickChat must not receive or install ZapFast's signed release binaries.
+    pub(crate) fork_mode: bool,
+    #[cfg(all(target_os = "macos", feature = "quickchat"))]
+    pub(crate) quickchat_hotkey: Option<crate::quickchat::hotkey::Registration>,
     /// Whether window close should keep the process running.
     pub hide_intent: bool,
     /// Whether a headless app should create a window.
@@ -1047,9 +1053,9 @@ impl fastframe_shell::Resident for App {
 /// How long a hidden start waits for a panel to show the tray item.
 const TRAY_WAIT: Duration = Duration::from_secs(30);
 
-const TRAY_SHOW: &str = "show";
-const TRAY_LOCK: &str = "lock";
-const TRAY_QUIT: &str = "quit";
+pub(crate) const TRAY_SHOW: &str = "show";
+pub(crate) const TRAY_LOCK: &str = "lock";
+pub(crate) const TRAY_QUIT: &str = "quit";
 
 /// What a tray click asks for: a left click on Linux, or the menu's first
 /// entry, toggles the window; a left click on Windows and a Dock click on
@@ -1072,7 +1078,7 @@ fn tray_action(event: fastframe_tray::Event, window_hidden: bool) -> Option<Acti
 ///
 /// "Lock ZapFast" is always in the menu, hidden without a password;
 /// `App::sync_tray` shows or hides it as the password is set or removed.
-fn tray_config(lockable: bool) -> fastframe_tray::Config {
+pub(crate) fn tray_config(lockable: bool) -> fastframe_tray::Config {
     use fastframe_tray::MenuItem;
     fastframe_tray::Config {
         id: "zapfast",
@@ -1174,8 +1180,12 @@ impl App {
         }
         if options.tray {
             let waker = waker.clone();
-            app.tray =
-                fastframe_tray::Tray::spawn(tray_config(app.tray_lockable), move || waker.wake());
+            let menu = if crate::identity::QUICKCHAT {
+                crate::quickchat::tray_config(app.tray_lockable)
+            } else {
+                tray_config(app.tray_lockable)
+            };
+            app.tray = fastframe_tray::Tray::spawn(menu, move || waker.wake());
         }
         // The clock preference may wait on the desktop portal on Linux; keep
         // it off the first frame.
@@ -1226,6 +1236,8 @@ impl App {
     /// start now: they otherwise wait for a first frame, which a hidden start
     /// only draws once the tray or another launch shows the window.
     pub fn start_hidden(&mut self) {
+        #[cfg(all(target_os = "macos", feature = "quickchat"))]
+        self.ensure_quickchat_hotkey();
         self.hide_intent = true;
         // No window will attach the tray, which makes the macOS item; make
         // it now without bringing ZapFast forward.
@@ -1479,6 +1491,10 @@ impl App {
             test_raised: false,
             tray_lockable,
             window_hidden: false,
+            quickchat: crate::quickchat::State::default(),
+            fork_mode: false,
+            #[cfg(all(target_os = "macos", feature = "quickchat"))]
+            quickchat_hotkey: None,
             hide_intent: false,
             wants_show: false,
             tray_wait: None,
@@ -1820,6 +1836,7 @@ impl App {
             self.search_hits.clear();
         }
         self.window_hidden = true;
+        self.quickchat.hide();
         self.window_focused = false;
         self.hide_intent = false;
         self.wants_show = false;
@@ -1909,11 +1926,12 @@ impl App {
             return;
         };
         let hidden = self.window_hidden;
-        self.actions.extend(
-            events
-                .into_iter()
-                .filter_map(|event| tray_action(event, hidden)),
-        );
+        for event in events {
+            if self.fork_mode && self.quickchat_tray_event(&event) {
+                continue;
+            }
+            self.actions.extend(tray_action(event, hidden));
+        }
     }
 
     /// Offers "Lock ZapFast" in the tray exactly while an app lock password
@@ -1937,7 +1955,12 @@ impl App {
             std::mem::take(&mut *queue.lock().unwrap_or_else(|p| p.into_inner()));
         for command in commands {
             match command {
-                ControlCommand::Show => self.actions.push(Action::ShowWindow),
+                ControlCommand::Show => self.actions.push(if self.fork_mode {
+                    Action::ShowAllChats
+                } else {
+                    Action::ShowWindow
+                }),
+                ControlCommand::AllChats => self.actions.push(Action::ShowAllChats),
                 ControlCommand::ReloadThemes => self.actions.push(Action::ReloadThemes),
                 ControlCommand::Quit => self.actions.push(Action::Quit),
                 ControlCommand::Ping => {}
@@ -1946,7 +1969,12 @@ impl App {
                     self.actions
                         .push(Action::OpenUrl(format!("https://chat.whatsapp.com/{code}")));
                 }
+                ControlCommand::QuickSearch => self.open_quick_search(""),
+                ControlCommand::QuickSearchQuery(query) => self.open_quick_search(&query),
                 ControlCommand::OpenChat(request) => {
+                    if self.fork_mode {
+                        self.quickchat.panel();
+                    }
                     // The chat is only visible in a window, so a run
                     // started into the tray shows one first.
                     self.actions.push(Action::ShowWindow);
@@ -1977,6 +2005,15 @@ impl App {
                 .unwrap_or_else(|p| p.into_inner()),
         );
         for target in opened {
+            // Never route a stale click from a removed account into another
+            // account, even if the same chat id exists in both accounts.
+            if !self
+                .accounts
+                .iter()
+                .any(|account| account.id == target.account)
+            {
+                continue;
+            }
             // Behind the app lock nothing changes yet: the message, with its
             // account, opens once unlocked.
             if self.app_lock.is_locked() {
@@ -1986,6 +2023,9 @@ impl App {
                 continue;
             }
             self.switch_account(&target.account);
+            if self.fork_mode {
+                self.quickchat.panel();
+            }
             match target.message {
                 Some(message) => self.actions.push(Action::OpenMessage {
                     chat: target.chat,
@@ -2197,6 +2237,8 @@ impl App {
         // Ours hands the tray its own events (#215).
         #[cfg(target_os = "macos")]
         crate::macos::attach(ctx);
+        #[cfg(all(target_os = "macos", feature = "quickchat"))]
+        self.ensure_quickchat_hotkey();
         if let Some(tray) = &mut self.tray {
             tray.attach();
         }
@@ -5636,7 +5678,8 @@ impl App {
         self.toasts.retain(|toast| {
             toast.kind == ToastKind::Error || toast.created.elapsed() < INFO_TOAST_LIFETIME
         });
-        if self.settings.check_for_updates
+        if !self.fork_mode
+            && self.settings.check_for_updates
             && !self.backend.is_offline()
             && self
                 .last_update_check
@@ -5675,6 +5718,9 @@ impl App {
     }
 
     fn inspect_update(&mut self) {
+        if self.fork_mode {
+            return;
+        }
         if self.update_support.is_none() && !self.update_inspecting {
             self.update_inspecting = true;
             self.backend.send(Command::InspectUpdate);
@@ -5682,7 +5728,8 @@ impl App {
     }
 
     fn maybe_download_update(&mut self) {
-        if !self.settings.check_for_updates
+        if self.fork_mode
+            || !self.settings.check_for_updates
             || !self.settings.download_updates_automatically
             || self.update.is_none()
             || !matches!(self.update_download, crate::updates::DownloadState::Idle)
@@ -5696,6 +5743,9 @@ impl App {
     }
 
     fn download_update(&mut self) {
+        if self.fork_mode {
+            return;
+        }
         if !matches!(
             self.update_download,
             crate::updates::DownloadState::Idle | crate::updates::DownloadState::Failed(_)
@@ -5758,6 +5808,11 @@ impl App {
     /// settings, in logical pixels, so a window saved while zoomed opens at
     /// the same size; see [`fastframe_shell::window::Geometry`].
     fn sync_window_state(&mut self, ctx: &egui::Context) {
+        // Quick Search and its transient right panel must not overwrite
+        // the ordinary full window's saved size or location.
+        if self.quickchat.mode != crate::quickchat::Mode::Normal || self.reopen {
+            return;
+        }
         let mut geometry = self.settings.window_geometry();
         if geometry.remember(ctx) {
             self.settings.set_window_geometry(geometry);
@@ -7922,6 +7977,9 @@ impl App {
             Action::CloseUpdate => self.show_update = false,
             Action::DownloadUpdate => self.download_update(),
             Action::InstallUpdate => {
+                if self.fork_mode {
+                    return;
+                }
                 if matches!(
                     self.update_download,
                     crate::updates::DownloadState::Ready(_)
@@ -8233,6 +8291,22 @@ impl App {
                 self.quit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+            Action::ShowAllChats => {
+                let was_compact = self.quickchat.mode != crate::quickchat::Mode::Normal;
+                self.quickchat.hide();
+                self.page = Page::Chats;
+                if self.window_hidden {
+                    self.actions.push(Action::ShowWindow);
+                } else if was_compact {
+                    // Create a fresh full-size window using saved geometry.
+                    // Resizing the always-on-top popup in place would retain
+                    // its transient position and window level.
+                    self.reopen = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                } else {
+                    self.actions.push(Action::ShowWindow);
+                }
+            }
             Action::ShowWindow => {
                 if self.window_hidden {
                     // The headless loop in `main` will create the window.
@@ -8446,6 +8520,12 @@ impl App {
         self.report_presence();
         self.handle_power();
         self.handle_tray();
+        #[cfg(all(target_os = "macos", feature = "quickchat"))]
+        if crate::quickchat::hotkey::take() {
+            self.open_quick_search("");
+        }
+        #[cfg(all(target_os = "macos", feature = "quickchat"))]
+        self.sync_quickchat_dock();
         #[cfg(target_os = "macos")]
         self.actions.extend(crate::macos::drain(self.window_hidden));
         self.handle_control_commands();
@@ -8595,6 +8675,9 @@ impl App {
             Deferred::Chat(_) | Deferred::Invite(_) => here.clone(),
         };
         self.actions.push(Action::SwitchAccount(account));
+        if self.fork_mode && !matches!(request, Deferred::Invite(_)) {
+            self.quickchat.panel();
+        }
         match request {
             Deferred::Message(target) => {
                 // A call's notification has no message: switching to its
@@ -9111,13 +9194,14 @@ impl App {
         let regained_focus = focused && !self.window_focused;
         // Mark messages received while hidden as read on window return.
         if regained_focus
+            && self.quickchat.mode != crate::quickchat::Mode::Search
             && self.chat_view()
             && let Some(open) = self.open_chat.clone()
             && self.chat(&open).is_some_and(|chat| chat.unread > 0)
         {
             self.mark_read(&open);
         }
-        if regained_focus {
+        if regained_focus && self.quickchat.mode != crate::quickchat::Mode::Search {
             self.refocus_composer(ctx);
         }
         self.window_focused = focused;
@@ -11476,6 +11560,200 @@ mod tests {
             app.app_lock.deferred.as_slice(),
             [crate::app_lock::Deferred::Message(target)] if target.account.as_str() == "2"
         ));
+    }
+
+    #[test]
+    fn quickchat_first_pairing_blocks_search_until_phone_linked() {
+        let mut app = app();
+        app.enable_quickchat_fork();
+        app.quickchat.search_with_query("Ahmet");
+        assert!(app.quickchat_needs_link());
+        assert!(!app.quickchat_ready());
+
+        // The transport has connected but the phone has not paired. This
+        // used to be treated as linked, leaving a blank Quick Search window.
+        app.link = LinkStatus::Connecting;
+        assert!(
+            app.is_linked(),
+            "legacy list view treats Connecting as linked"
+        );
+        assert!(app.quickchat_needs_link(), "QuickChat must not");
+        app.link = LinkStatus::Unlinked {
+            qr: Some("synthetic-pairing-code".into()),
+            pair_code: None,
+            pairing_phone: None,
+        };
+        assert!(
+            app.quickchat_needs_link(),
+            "a visible QR is not a linked session"
+        );
+
+        app.link = LinkStatus::Connected;
+        assert!(app.quickchat_ready());
+        assert!(!app.quickchat_needs_link());
+        assert_eq!(app.quickchat.query, "Ahmet", "keep the pending search");
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Search);
+    }
+
+    #[test]
+    fn quickchat_only_searches_previously_linked_offline_sessions() {
+        let mut app = app();
+        app.enable_quickchat_fork();
+        app.link = LinkStatus::Connecting;
+        assert!(!app.quickchat_ready());
+
+        app.chats
+            .push(Chat::new("123@s.whatsapp.net".into(), "Ada".into()));
+        assert!(
+            app.quickchat_ready(),
+            "cached chats prove an earlier pairing"
+        );
+
+        app.link = LinkStatus::Unlinked {
+            qr: None,
+            pair_code: None,
+            pairing_phone: None,
+        };
+        assert!(
+            !app.quickchat_ready(),
+            "an explicit unlink blocks stale chats"
+        );
+        app.link = LinkStatus::Failed("Synthetic connection error".into());
+        assert!(!app.quickchat_ready(), "failed pairing shows recovery");
+    }
+
+    #[test]
+    fn switching_quick_panel_to_full_chats_recreates_normal_window() {
+        use fastframe_shell::Resident;
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.enable_quickchat_fork();
+        app.quickchat.search_with_query("Ada");
+        app.quickchat.panel();
+        assert!(app.quickchat.resize_pending);
+
+        app.apply(Action::ShowAllChats, &ctx);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
+        assert!(app.quickchat.query.is_empty());
+        assert!(!app.quickchat.resize_pending);
+        assert_eq!(app.page, Page::Chats);
+        assert!(app.reopen, "recreate the full-size non-floating window");
+        assert!(!app.quit_requested);
+        assert_eq!(app.closed(), fastframe_shell::Closed::Reopen);
+
+        // The new window's attach clears `reopen`; the compact mode is gone
+        // before that window is made, so it opens at the saved size.
+        app.window_gone();
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
+    }
+
+    #[test]
+    fn open_from_running_quickchat_instance_routes_to_full_chats() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::headless(AppDirs::under(directory.path()), Settings::default()).0;
+        let ctx = egui::Context::default();
+        app.enable_quickchat_fork();
+        let queue = std::sync::Arc::default();
+        app.control_commands = Some(std::sync::Arc::clone(&queue));
+        app.quickchat.panel();
+        queue.lock().unwrap().push(ControlCommand::AllChats);
+        app.handle_control_commands();
+        app.apply_actions(&ctx);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
+        assert!(
+            app.reopen,
+            "running compact window reopens with full layout"
+        );
+        assert!(!app.quit_requested);
+
+        app.window_gone();
+        app.window_hidden = true;
+        app.quickchat.search();
+        queue.lock().unwrap().push(ControlCommand::Show);
+        app.handle_control_commands();
+        app.apply_actions(&ctx);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
+        assert!(app.wants_show, "open QuickChat.app should show all chats");
+    }
+
+    #[test]
+    fn full_chats_from_hidden_resident_app_just_requests_a_window() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.enable_quickchat_fork();
+        app.window_hidden = true;
+        app.quickchat.search_with_query("Ada");
+        app.apply(Action::ShowAllChats, &ctx);
+        app.apply_actions(&ctx);
+        assert!(app.wants_show);
+        assert!(!app.reopen);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
+    }
+
+    #[test]
+    fn quickchat_name_from_local_ipc_prefills_only_search() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::headless(AppDirs::under(directory.path()), Settings::default()).0;
+        let ctx = egui::Context::default();
+        app.enable_quickchat_fork();
+        app.control_commands = Some(std::sync::Arc::new(std::sync::Mutex::new(vec![
+            ControlCommand::QuickSearchQuery("Ahmet Yılmaz".into()),
+        ])));
+        app.handle_control_commands();
+        app.apply_actions(&ctx);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Search);
+        assert_eq!(app.quickchat.query, "Ahmet Yılmaz");
+        assert_eq!(app.open_chat, None, "no recipient was selected");
+        assert!(app.composer.is_empty(), "no outgoing text was prepared");
+    }
+
+    #[test]
+    fn quickchat_notification_opens_the_origin_account_in_panel() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _commands) = two_accounts(directory.path());
+        let ctx = egui::Context::default();
+        let chat = "15550003333@s.whatsapp.net";
+        app.enable_quickchat_fork();
+        // The same JID can appear in more than one linked account.
+        for account in &mut app.accounts {
+            account.chats = vec![Chat::new(chat.into(), "Ada".into())];
+        }
+        app.notification_opens
+            .lock()
+            .unwrap()
+            .push(crate::notify::NotificationTarget {
+                account: AccountId::parse("2").unwrap(),
+                chat: chat.into(),
+                message: "message-2".into(),
+            });
+        app.handle_notification_opens();
+        app.apply_actions(&ctx);
+        assert_eq!(app.account().id.as_str(), "2");
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Panel);
+        assert_eq!(app.open_chat.as_deref(), Some(chat));
+    }
+
+    #[test]
+    fn a_stale_notification_cannot_open_another_accounts_chat() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _commands) = two_accounts(directory.path());
+        let ctx = egui::Context::default();
+        let chat = "15550003333@s.whatsapp.net";
+        app.enable_quickchat_fork();
+        app.accounts[0].chats = vec![Chat::new(chat.into(), "Ada".into())];
+        app.notification_opens
+            .lock()
+            .unwrap()
+            .push(crate::notify::NotificationTarget {
+                account: AccountId::parse("3").unwrap(),
+                chat: chat.into(),
+                message: "stale".into(),
+            });
+        app.handle_notification_opens();
+        app.apply_actions(&ctx);
+        assert_eq!(app.account().id, AccountId::first());
+        assert_eq!(app.open_chat, None);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
     }
 
     #[test]
@@ -20951,6 +21229,26 @@ mod app_lock_tests {
                 crate::app_lock::Deferred::Invite("AbCdEf1234567890XyZ".into()),
             ]
         );
+    }
+
+    #[test]
+    fn quickchat_link_deferred_by_app_lock_opens_in_the_panel() {
+        let ctx = egui::Context::default();
+        let mut app = app_with(settings(Some(PASSWORD)));
+        app.enable_quickchat_fork();
+        app.chats = vec![Chat::new(CHAT.into(), "Ada Lovelace".into())];
+
+        app.apply(
+            Action::StartChat {
+                id: CHAT.into(),
+                name: "Ada Lovelace".into(),
+            },
+            &ctx,
+        );
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Normal);
+        try_password(&mut app, &ctx, PASSWORD);
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Panel);
+        assert_eq!(app.open_chat.as_deref(), Some(CHAT));
     }
 
     /// Without a password there is nothing to wait for: the link opens.

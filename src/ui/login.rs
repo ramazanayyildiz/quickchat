@@ -1,6 +1,7 @@
 //! Phone linking with a QR code or pairing code.
 
 use egui::{Align, CornerRadius, Frame, Layout, Margin, Stroke, Vec2};
+use std::time::Duration;
 
 use crate::app::App;
 use crate::backend::LinkStatus;
@@ -9,7 +10,12 @@ use crate::qr::Qr;
 use crate::theme::{self, Icon};
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
-    card(app, ui, "login", "A native WhatsApp client.", body);
+    let tagline = if app.is_quickchat_fork() {
+        "Link WhatsApp once, then search any conversation by name."
+    } else {
+        "A native WhatsApp client."
+    };
+    card(app, ui, "login", tagline, body);
 }
 
 /// The centred card of the linking and lock screens: the logo, the name,
@@ -61,7 +67,7 @@ pub(super) fn card(
                     let (logo, _) = ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
                     theme::mark(ui, logo.center(), 64.0);
                     ui.add_space(4.0);
-                    theme::text(ui, "ZapFast", theme::bold(28.0), palette.text);
+                    theme::text(ui, crate::identity::NAME, theme::bold(28.0), palette.text);
                     theme::text(ui, tagline, theme::regular(14.5), palette.secondary);
                     ui.add_space(16.0);
                     body(app, ui);
@@ -80,9 +86,23 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
     match app.link.clone() {
         LinkStatus::Starting | LinkStatus::Connecting => {
             busy(ui, palette.accent, "Connecting to WhatsApp…");
+            if app.is_quickchat_fork() {
+                waiting_for_pairing(app, ui, "connecting");
+            }
         }
-        LinkStatus::Connected | LinkStatus::Disconnected { .. } => {
+        LinkStatus::Connected => {
             busy(ui, palette.accent, "Linked. Waiting for your chats…");
+        }
+        LinkStatus::Disconnected { .. } if app.quickchat_needs_link() => {
+            busy(
+                ui,
+                palette.warning,
+                "Connection interrupted before pairing…",
+            );
+            waiting_for_pairing(app, ui, "disconnected");
+        }
+        LinkStatus::Disconnected { .. } => {
+            busy(ui, palette.accent, "Reconnecting to WhatsApp…");
         }
         LinkStatus::LoggedOut => {
             theme::icon(ui, Icon::Smartphone, 28.0, palette.warning);
@@ -94,6 +114,9 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
             );
             ui.add_space(8.0);
             busy(ui, palette.accent, "Requesting a new code…");
+            if app.is_quickchat_fork() {
+                waiting_for_pairing(app, ui, "logged-out");
+            }
         }
         LinkStatus::Failed(message) => {
             let key_lost = archive_key_lost(&message);
@@ -145,10 +168,16 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
                     palette.accent,
                     &format!("Requesting a code for +{phone}…"),
                 );
+                if app.is_quickchat_fork() {
+                    waiting_for_pairing(app, ui, "phone-code");
+                }
             } else if let Some(qr) = qr {
                 qr_view(app, ui, &qr);
             } else {
                 busy(ui, palette.accent, "Waiting for a code from WhatsApp…");
+                if app.is_quickchat_fork() {
+                    waiting_for_pairing(app, ui, "qr-code");
+                }
             }
         }
     }
@@ -160,6 +189,52 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
         theme::regular(11.5),
         palette.dim,
     );
+}
+
+/// Linking has no guaranteed QR response time: the WhatsApp transport may
+/// be offline, blocked or waiting for a pairing event. Keep a manual recovery
+/// path instead of leaving the user behind an unbounded spinner. We deliberately
+/// do not reconnect automatically or discard a real linked-device session.
+fn waiting_for_pairing(app: &mut App, ui: &mut egui::Ui, phase: &'static str) {
+    let now = ui.input(|input| input.time);
+    let id = egui::Id::new(("quickchat-pairing-wait", app.account().id.as_str(), phase));
+    let since = ui.ctx().data_mut(|data| match data.get_temp::<f64>(id) {
+        Some(started) if started <= now => started,
+        _ => {
+            data.insert_temp(id, now);
+            now
+        }
+    });
+    // The login view repaints while awaiting protocol events; the countdown
+    // is purely local and never starts a background network poll.
+    ui.ctx().request_repaint_after(Duration::from_secs(1));
+    if now - since < 15.0 {
+        return;
+    }
+    ui.add_space(12.0);
+    ui.label(
+        egui::RichText::new(
+            "The pairing code has not arrived. Check your internet connection and retry.",
+        )
+        .small()
+        .color(app.palette.secondary),
+    );
+    ui.add_space(8.0);
+    if theme::pill_button(ui, &app.palette, "Retry WhatsApp connection", true).clicked() {
+        ui.ctx().data_mut(|data| data.insert_temp(id, now));
+        app.actions.push(Action::Reconnect);
+    }
+    if phase != "connecting"
+        && theme::link(
+            ui,
+            "Or link with your phone number",
+            theme::regular(12.5),
+            app.palette.link,
+        )
+        .clicked()
+    {
+        app.actions.push(Action::ShowDialog(Dialog::PairWithPhone));
+    }
 }
 
 pub(super) fn busy(ui: &mut egui::Ui, color: egui::Color32, label: &str) {

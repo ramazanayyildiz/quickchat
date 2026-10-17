@@ -45,19 +45,20 @@ fn item(id: &str, text: &str, shortcut: Option<&str>) -> MenuItem {
 
 fn build_menu() -> tray_icon::menu::Result<Menu> {
     let menu = Menu::new();
-    let app = Submenu::new("ZapFast", true);
+    let name = crate::identity::NAME;
+    let app = Submenu::new(name, true);
     app.append_items(&[
-        &item("about", "About ZapFast", None),
+        &item("about", &format!("About {name}"), None),
         &Native::separator(),
         &item("settings", "Settings…", Some("Super+Comma")),
         &Native::separator(),
         &Native::services(None),
         &Native::separator(),
-        &Native::hide(Some("Hide ZapFast")),
+        &Native::hide(Some(&format!("Hide {name}"))),
         &Native::hide_others(None),
         &Native::show_all(None),
         &Native::separator(),
-        &item("quit", "Quit ZapFast", Some("Super+KeyQ")),
+        &item("quit", &format!("Quit {name}"), Some("Super+KeyQ")),
     ])?;
     let file = Submenu::new("File", true);
     file.append_items(&[
@@ -94,12 +95,15 @@ fn build_menu() -> tray_icon::menu::Result<Menu> {
         &Native::minimize(None),
         &Native::maximize(Some("Zoom")),
         &Native::separator(),
-        &item("show-window", "Show ZapFast", None),
+        &item("show-window", &format!("Show {name}"), None),
     ])?;
+    if crate::identity::QUICKCHAT {
+        window.append(&item("all-chats", "All Chats", None))?;
+    }
     let help = Submenu::new("Help", true);
     help.append_items(&[
         &item("shortcuts", "Keyboard Shortcuts", Some("Super+Slash")),
-        &item("help", "ZapFast Help", None),
+        &item("help", &format!("{name} Help"), None),
     ])?;
     menu.append_items(&[&app, &file, &edit, &view, &window, &help])?;
     window.set_as_windows_menu_for_nsapp();
@@ -233,6 +237,7 @@ fn action(id: &str) -> Option<Action> {
         "shortcuts" => Action::ShowDialog(Dialog::Shortcuts),
         "help" => Action::OpenUrl("https://zapfast.rocks/using-zapfast/".into()),
         "show-window" => Action::ShowWindow,
+        "all-chats" => Action::ShowAllChats,
         _ => return None,
     })
 }
@@ -303,6 +308,7 @@ mod tests {
         assert!(matches!(action("close"), Some(Action::CloseWindow)));
         assert!(matches!(action("quit"), Some(Action::Quit)));
         assert!(matches!(action("show-window"), Some(Action::ShowWindow)));
+        assert!(matches!(action("all-chats"), Some(Action::ShowAllChats)));
         assert!(matches!(edit_event("copy"), Some(egui::Event::Copy)));
         assert!(
             matches!(edit_event("redo"), Some(egui::Event::Key { key: egui::Key::Z, modifiers, .. }) if modifiers.command && modifiers.shift)

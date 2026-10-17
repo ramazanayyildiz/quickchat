@@ -245,13 +245,15 @@ raw-window-handle = "0.6"
 winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# QuickChat's Carbon-backed shortcut, no Accessibility permission required.
+global-hotkey = { version = "0.8", optional = true }
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 # The application menu bar, built with tray-icon's muda at the version
 # fastframe-tray uses.
 tray-icon = { version = "0.25", default-features = false }
 # AppKit calls for the application menus and editing commands on the main thread.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAppearance", "NSApplication", "NSGraphics", "NSResponder", "NSText", "NSView", "NSVisualEffectView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAppearance", "NSApplication", "NSGraphics", "NSResponder", "NSRunningApplication", "NSText", "NSView", "NSVisualEffectView", "NSWindow"] }
 # Reaches the window behind eframe's view, for the Messages theme's vibrancy.
 raw-window-handle = "0.6"
 # Reads the locale's clock format.
@@ -295,6 +297,9 @@ harness = false
 [features]
 # Sample data, layout tests, and screenshots. Not used in release builds.
 demo = []
+# QuickChat: a separate macOS companion with its own identity and a
+# global quick-search shortcut. See docs/quickchat-local.md.
+quickchat = ["dep:global-hotkey"]
 
 [profile.release]
 lto = "thin"
