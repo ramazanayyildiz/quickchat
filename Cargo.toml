@@ -15,7 +15,7 @@ name = "zapfast"
 path = "src/lib.rs"
 
 [[bin]]
-name = "quickchat"
+name = "zapfast"
 path = "src/main.rs"
 
 [dependencies]
@@ -212,8 +212,8 @@ zbus = { version = "5.19", default-features = false, features = ["blocking-api",
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Carbon-backed shortcut, no Accessibility permission required.
-global-hotkey = "0.8"
+# QuickChat's Carbon-backed shortcut, no Accessibility permission required.
+global-hotkey = { version = "0.8", optional = true }
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 # The application menu bar, built with tray-icon's muda at the version
 # fastframe-tray uses.
@@ -221,7 +221,7 @@ tray-icon = { version = "0.25", default-features = false }
 # AppKit calls for the application menus and editing commands, on the main
 # thread.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSText", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication", "NSText", "NSView", "NSWindow"] }
 # Reads the locale's clock format.
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDateFormatter", "NSFormatter", "NSLocale", "NSString"] }
 # Notifications through UNUserNotificationCenter: notify-rust's macOS backend
@@ -263,6 +263,9 @@ harness = false
 [features]
 # Sample data, layout tests, and screenshots. Not used in release builds.
 demo = []
+# QuickChat: a separate macOS companion with its own identity and a
+# global quick-search shortcut. See docs/quickchat-local.md.
+quickchat = ["dep:global-hotkey"]
 
 [profile.release]
 lto = "thin"

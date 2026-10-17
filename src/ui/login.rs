@@ -67,16 +67,7 @@ pub(super) fn card(
                     let (logo, _) = ui.allocate_exact_size(Vec2::splat(64.0), egui::Sense::hover());
                     theme::mark(ui, logo.center(), 64.0);
                     ui.add_space(4.0);
-                    theme::text(
-                        ui,
-                        if app.is_quickchat_fork() {
-                            "QuickChat"
-                        } else {
-                            "ZapFast"
-                        },
-                        theme::bold(28.0),
-                        palette.text,
-                    );
+                    theme::text(ui, crate::identity::NAME, theme::bold(28.0), palette.text);
                     theme::text(ui, tagline, theme::regular(14.5), palette.secondary);
                     ui.add_space(16.0);
                     body(app, ui);

@@ -174,12 +174,8 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
                 .weak()
                 .small(),
         );
-        #[cfg(target_os = "macos")]
-        ui.label(
-            egui::RichText::new(crate::quickchat_hotkey::status())
-                .weak()
-                .small(),
-        );
+        #[cfg(all(target_os = "macos", feature = "quickchat"))]
+        ui.label(egui::RichText::new(super::hotkey::status()).weak().small());
     });
     if let Some(hit) = chosen {
         choose(app, hit);

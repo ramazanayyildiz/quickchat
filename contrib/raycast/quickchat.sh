@@ -14,17 +14,17 @@ set -euo pipefail
 app="$HOME/Applications/QuickChat.app/Contents/MacOS/quickchat"
 system_app="/Applications/QuickChat.app/Contents/MacOS/quickchat"
 project_app="$HOME/CODE/Ram/quickchat/QuickChat.app/Contents/MacOS/quickchat"
-built="$HOME/CODE/Ram/quickchat/target/debug/quickchat"
 
-# Development build first, so an older installed copy cannot swallow the
-# new --quick-query argument during testing.
+# Development bundle first, so an older installed copy cannot swallow the
+# new --quick-query argument during testing. Never a bare target/ binary:
+# without the quickchat feature that is ZapFast.
 if [ -n "${1:-}" ]; then
   args=(--quick-query "$1")
 else
   args=(--quick)
 fi
 
-for bin in "$project_app" "$app" "$system_app" "$built"; do
+for bin in "$project_app" "$app" "$system_app"; do
   if [ -x "$bin" ]; then
     # QuickChat is a resident app: Raycast must not wait for the GUI process.
     # If an instance is already running, this child forwards the request to it.

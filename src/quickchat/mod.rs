@@ -3,6 +3,15 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[cfg(all(target_os = "macos", feature = "quickchat"))]
+mod dock;
+mod hooks;
+#[cfg(all(target_os = "macos", feature = "quickchat"))]
+pub mod hotkey;
+pub mod ui;
+
+pub(crate) use hooks::tray_config;
+
 use crate::account::Account;
 use crate::model::{AccountId, Chat, ChatKind, Contact};
 

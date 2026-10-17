@@ -2,6 +2,11 @@
 
 ## Scope
 
+QuickChat is built from this repository with `--features quickchat`. Without
+the feature the same source builds ZapFast unchanged. `src/identity.rs` holds
+every name, folder, keyring service and instance slot that differs, and
+`src/quickchat/` holds the launcher; `app.rs` only calls into it.
+
 QuickChat is an independent macOS WhatsApp companion fork of ZapFast. It does
 not reuse ZapFast/FastsApp's app bundle identifier, account data directory,
 archive Keychain service or single-instance slot. No archive/phone data was
@@ -31,14 +36,14 @@ Current pilot includes:
 
 ## Build without touching a real WhatsApp account
 
-Requirements: macOS 14+, Apple Silicon, Rust 1.98+, CMake, Xcode command line
+Requirements: macOS 11+, Apple Silicon, Rust 1.98+, CMake, Xcode command line
 tools. Initial build of the original pinned dependencies needs disk space.
 
 ```sh
 cd ~/CODE/Ram/quickchat
 brew install cmake
 cargo fmt --all
-cargo test --lib quickchat::tests
+cargo test --lib --features quickchat quickchat::
 cargo test --lib single_instance::tests
 cargo test --locked --all-targets
 ```
@@ -49,8 +54,8 @@ reproduces the original QR-loading state without a network connection;
 the manual retry control appears after 15 seconds:
 
 ```sh
-cargo run --features demo --bin quickchat -- --demo --quick
-cargo run --features demo --bin quickchat -- --demo --quick --demo-page waiting
+cargo run --features demo,quickchat -- --demo --quick
+cargo run --features demo,quickchat -- --demo --quick --demo-page waiting
 ```
 
 If the demo renders correctly, build a **synthetic-data** macOS bundle
@@ -58,8 +63,8 @@ to test the native shortcut, position and close behavior without pairing a
 WhatsApp account:
 
 ```sh
-cargo build --locked --features demo --bin quickchat
-packaging/macos/bundle.sh target/debug/quickchat QuickChat.app 0.19.0
+cargo build --locked --features demo,quickchat
+packaging/macos/quickchat/bundle.sh target/debug/zapfast QuickChat.app 0.19.0
 open QuickChat.app --args --demo --quick
 ```
 
@@ -156,8 +161,8 @@ existing ZapFast account archives.
 ```sh
 cd ~/CODE/Ram/quickchat
 cargo fmt --all
-cargo build --locked --bin quickchat
-packaging/macos/bundle.sh target/debug/quickchat QuickChat.app 0.19.0
+cargo build --locked --features quickchat
+packaging/macos/quickchat/bundle.sh target/debug/zapfast QuickChat.app 0.19.0
 open QuickChat.app
 ```
 

@@ -48,7 +48,11 @@ mod platform {
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")))?;
-        Some(config.join("autostart").join("quickchat.desktop"))
+        Some(
+            config
+                .join("autostart")
+                .join(format!("{}.desktop", crate::identity::BIN)),
+        )
     }
 
     pub fn enabled() -> bool {
@@ -72,13 +76,15 @@ mod platform {
         format!(
             "[Desktop Entry]\n\
              Type=Application\n\
-             Name=QuickChat\n\
-             Comment=Start QuickChat in the tray\n\
+             Name={name}\n\
+             Comment=Start {name} in the tray\n\
              Exec={} {HIDDEN}\n\
-             Icon=quickchat\n\
+             Icon={icon}\n\
              Terminal=false\n\
              X-GNOME-Autostart-enabled=true\n",
-            exec_quote(&executable.to_string_lossy())
+            exec_quote(&executable.to_string_lossy()),
+            name = crate::identity::NAME,
+            icon = crate::identity::BIN,
         )
     }
 
@@ -103,7 +109,7 @@ mod platform {
 mod platform {
     use super::*;
 
-    const LABEL: &str = "app.quickchat.desktop";
+    const LABEL: &str = crate::identity::LAUNCH_AGENT;
 
     fn entry() -> Option<PathBuf> {
         let home = std::env::var_os("HOME")?;
@@ -172,7 +178,7 @@ mod platform {
     };
 
     const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-    const VALUE: &str = "QuickChat";
+    const VALUE: &str = crate::identity::NAME;
 
     fn wide(text: &str) -> Vec<u16> {
         std::ffi::OsStr::new(text)

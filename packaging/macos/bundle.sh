@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build QuickChat.app from a GUI binary on macOS.
+# Build ZapFast.app from a GUI binary on macOS.
 #
 #   packaging/macos/bundle.sh <binary> <output.app> <version>
 #
@@ -16,19 +16,14 @@ version="$3"
 numeric_version="${version%%-*}"
 here="$(cd "$(dirname "$0")" && pwd)"
 
-# Guard the original application's bundle against accidental replacement.
-if [ "$(basename "$app")" != "QuickChat.app" ]; then
-    echo "QuickChat bundles must be written to a QuickChat.app destination" >&2
-    exit 2
-fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-cp "$binary" "$app/Contents/MacOS/quickchat"
-chmod 755 "$app/Contents/MacOS/quickchat"
+cp "$binary" "$app/Contents/MacOS/zapfast"
+chmod 755 "$app/Contents/MacOS/zapfast"
 sed "s/__VERSION__/$numeric_version/g" "$here/Info.plist" > "$app/Contents/Info.plist"
 
-iconset="$(mktemp -d)/quickchat.iconset"
+iconset="$(mktemp -d)/zapfast.iconset"
 mkdir -p "$iconset"
 # iconutil reads these base sizes and optional @2x versions. It ignores 64x64.
 for size in 16 32 128 256 512; do
@@ -36,7 +31,7 @@ for size in 16 32 128 256 512; do
     double=$((size * 2))
     sips -z $double $double "$here/icon-1024.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/quickchat.icns"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/zapfast.icns"
 
 # Attach the microphone entitlement before native-packages preserves it when
 # replacing the ad-hoc signature with a hardened Developer ID signature.

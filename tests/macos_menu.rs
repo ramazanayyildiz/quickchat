@@ -24,10 +24,7 @@ fn main() {
         &zapfast::backend::Waker::default(),
         dirs,
         settings,
-        zapfast::app::AppOptions {
-            tray: true,
-            quickchat: false,
-        },
+        zapfast::app::AppOptions { tray: true },
     )
     .expect("a fresh app over an empty folder");
     let ctx = egui::Context::default();

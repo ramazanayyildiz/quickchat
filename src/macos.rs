@@ -44,19 +44,20 @@ fn item(id: &str, text: &str, shortcut: Option<&str>) -> MenuItem {
 
 fn build_menu() -> tray_icon::menu::Result<Menu> {
     let menu = Menu::new();
-    let app = Submenu::new("QuickChat", true);
+    let name = crate::identity::NAME;
+    let app = Submenu::new(name, true);
     app.append_items(&[
-        &item("about", "About QuickChat", None),
+        &item("about", &format!("About {name}"), None),
         &Native::separator(),
         &item("settings", "Settings…", Some("Super+Comma")),
         &Native::separator(),
         &Native::services(None),
         &Native::separator(),
-        &Native::hide(Some("Hide QuickChat")),
+        &Native::hide(Some(&format!("Hide {name}"))),
         &Native::hide_others(None),
         &Native::show_all(None),
         &Native::separator(),
-        &item("quit", "Quit QuickChat", Some("Super+KeyQ")),
+        &item("quit", &format!("Quit {name}"), Some("Super+KeyQ")),
     ])?;
     let file = Submenu::new("File", true);
     file.append_items(&[
@@ -93,13 +94,15 @@ fn build_menu() -> tray_icon::menu::Result<Menu> {
         &Native::minimize(None),
         &Native::maximize(Some("Zoom")),
         &Native::separator(),
-        &item("show-window", "Show QuickChat", None),
-        &item("all-chats", "All Chats", None),
+        &item("show-window", &format!("Show {name}"), None),
     ])?;
+    if crate::identity::QUICKCHAT {
+        window.append(&item("all-chats", "All Chats", None))?;
+    }
     let help = Submenu::new("Help", true);
     help.append_items(&[
         &item("shortcuts", "Keyboard Shortcuts", Some("Super+Slash")),
-        &item("help", "QuickChat Help", None),
+        &item("help", &format!("{name} Help"), None),
     ])?;
     menu.append_items(&[&app, &file, &edit, &view, &window, &help])?;
     window.set_as_windows_menu_for_nsapp();

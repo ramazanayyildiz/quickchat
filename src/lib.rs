@@ -14,6 +14,7 @@ pub mod demo;
 pub mod diagnostics;
 pub mod emoji;
 pub mod i18n;
+pub mod identity;
 pub mod image_cache;
 pub mod image_preview;
 #[cfg(target_os = "macos")]
@@ -31,9 +32,6 @@ pub mod privacy;
 pub mod proxy;
 pub mod qr;
 pub mod quickchat;
-#[cfg(target_os = "macos")]
-pub mod quickchat_hotkey;
-pub mod quickchat_ui;
 pub mod safety;
 pub mod settings;
 pub mod single_instance;

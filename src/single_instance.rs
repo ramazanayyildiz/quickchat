@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 /// Stable wire identity shared with FastsApp so upgrades surface a running
 /// older copy before migrating its session files. On the wire every request
-/// and reply starts with `fastsapp:`.
-const NAME: &str = "fastsapp";
+/// and reply starts with `fastsapp:`. QuickChat has a slot of its own.
+const NAME: &str = crate::identity::INSTANCE;
 const PREFIX: &str = "fastsapp:";
 /// What ZapFast answers a request it takes: `fastsapp:ok` on the wire.
 const OK: &str = "ok";
@@ -81,41 +81,6 @@ fn slot(dir: &Path) -> fastframe_instance::Slot {
     fastframe_instance::Slot::at(dir, NAME)
 }
 
-/// Separate fork identity: the QuickChat instance cannot signal, lock, or
-/// take over a running ZapFast/FastsApp instance, including its legacy port.
-fn quickchat_slot(dir: &Path) -> fastframe_instance::Slot {
-    fastframe_instance::Slot::at(dir, "quickchat")
-}
-
-/// Owns the QuickChat slot without legacy ZapFast port discovery.
-pub fn acquire_quickchat(dir: &Path, waker: &crate::backend::Waker, verb: &str) -> Outcome {
-    let commands = Queue::default();
-    let (inbox, on_request) = (Arc::clone(&commands), waker.clone());
-    match quickchat_slot(dir).claim(verb, move |request| {
-        let command = parse(request)?;
-        inbox
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(command);
-        on_request.wake();
-        Some(OK.to_owned())
-    }) {
-        fastframe_instance::Claim::First(claim) => Outcome::Only(Guard {
-            commands,
-            _claim: claim,
-        }),
-        fastframe_instance::Claim::Running(_) => Outcome::Surfaced,
-        fastframe_instance::Claim::Unanswered | fastframe_instance::Claim::Declined => {
-            Outcome::Unanswered
-        }
-    }
-}
-
-/// Send a bounded command only to the running QuickChat instance.
-pub fn send_quickchat(dir: &Path, verb: &str) -> std::io::Result<()> {
-    quickchat_slot(dir).send(verb).map(drop)
-}
-
 /// Becomes the running instance, or hands `verb` to the one already running.
 pub fn acquire(dir: &Path, waker: &crate::backend::Waker, verb: &str) -> Outcome {
     let commands = Queue::default();
@@ -128,6 +93,14 @@ pub fn acquire(dir: &Path, waker: &crate::backend::Waker, verb: &str) -> Outcome
             return Outcome::Unanswered;
         }
     };
+    // QuickChat has no older copies, and must never answer or surface
+    // ZapFast's legacy port.
+    if crate::identity::QUICKCHAT {
+        return Outcome::Only(Guard {
+            commands,
+            _claim: claim,
+        });
+    }
     // A copy from before the lock only knows `show` and `ping`. A chat asked
     // of one surfaces its window rather than running a second ZapFast beside
     // it on the same archive and linked device.
@@ -448,10 +421,13 @@ mod tests {
         ));
 
         // A launch of an older version.
-        assert_eq!(raw_request(&dir, "fastsapp:show", None), "fastsapp:ok\n");
         assert_eq!(
-            raw_request(&dir, "fastsapp:frobnicate", None),
-            "fastsapp!declined\n",
+            raw_request(&dir, &format!("{NAME}:show"), None),
+            format!("{NAME}:ok\n")
+        );
+        assert_eq!(
+            raw_request(&dir, &format!("{NAME}:frobnicate"), None),
+            format!("{NAME}!declined\n"),
             "which an older copy reads as no answer"
         );
         #[cfg(not(unix))]
@@ -473,35 +449,23 @@ mod tests {
     }
 
     #[test]
-    fn quickchat_has_its_own_runtime_slot_and_search_verb() {
+    fn quick_search_verbs_reach_the_running_copy() {
         let root = tempfile::tempdir().unwrap();
-        let quick = root.path().join("quickchat-run");
-        let zapfast = root.path().join("zapfast-run");
         let waker = crate::backend::Waker::default();
-
-        let Outcome::Only(owner) = acquire_quickchat(&quick, &waker, "ping") else {
-            panic!("QuickChat should own a fresh private slot");
+        let queue = Queue::default();
+        let fastframe_instance::Claim::First(_owner) = claim(root.path(), "ping", &queue, &waker)
+        else {
+            panic!("a fresh folder has no running copy");
         };
-        send_quickchat(&quick, "quick").expect("the launcher command reaches QuickChat");
+        send(root.path(), "quick").expect("the launcher command arrives");
         let filtered = quick_search_verb("Proje Ekibi").unwrap();
-        send_quickchat(&quick, &filtered).expect("a name reaches QuickChat without contact data");
-        assert!(matches!(
-            acquire_quickchat(&quick, &waker, "quick"),
-            Outcome::Surfaced
-        ));
+        send(root.path(), &filtered).expect("a name arrives without contact data");
         assert_eq!(
-            owner.commands().lock().unwrap().as_slice(),
+            queue.lock().unwrap().as_slice(),
             &[
                 ControlCommand::QuickSearch,
                 ControlCommand::QuickSearchQuery("Proje Ekibi".into()),
-                ControlCommand::QuickSearch
             ]
         );
-
-        let queue = Queue::default();
-        assert!(matches!(
-            claim(&zapfast, "show", &queue, &waker),
-            fastframe_instance::Claim::First(_)
-        ));
     }
 }

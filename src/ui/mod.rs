@@ -49,10 +49,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         focus_ring(app, ctx);
         return;
     }
-    if app.quickchat.mode != crate::quickchat::Mode::Normal && app.quickchat_ready() {
+    if app.quickchat_compact() {
         let quick_mode = app.quickchat.mode;
         titlebar_strip(app, ui);
-        crate::quickchat_ui::show(app, ui);
+        crate::quickchat::ui::show(app, ui);
         if quick_mode == crate::quickchat::Mode::Panel {
             // Keep ordinary composer shortcuts and cancellation behavior.
             // The panel itself consumes Esc only when there is no modal state.
