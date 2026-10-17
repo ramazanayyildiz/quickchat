@@ -38,6 +38,35 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         focus_ring(app, ctx);
         return;
     }
+    // Connecting alone is not a paired WhatsApp device. The first-run
+    // shortcut must reveal onboarding, not a blank search or narrow panel.
+    if app.quickchat_needs_link() {
+        titlebar_strip(app, ui);
+        login::show(app, ui);
+        accounts::corner(app, ctx);
+        dialogs::show(app, ctx);
+        toasts(app, ctx);
+        focus_ring(app, ctx);
+        return;
+    }
+    if app.quickchat.mode != crate::quickchat::Mode::Normal && app.quickchat_ready() {
+        let quick_mode = app.quickchat.mode;
+        titlebar_strip(app, ui);
+        crate::quickchat_ui::show(app, ui);
+        if quick_mode == crate::quickchat::Mode::Panel {
+            // Keep ordinary composer shortcuts and cancellation behavior.
+            // The panel itself consumes Esc only when there is no modal state.
+            keys::handle(app, ctx);
+            picker::show(app, ctx);
+            dialogs::show(app, ctx);
+            image_preview::show(app, ctx);
+            video_preview::show(app, ctx);
+            drop_target(app, ui);
+        }
+        toasts(app, ctx);
+        focus_ring(app, ctx);
+        return;
+    }
     keys::handle(app, ctx);
     history_buttons(app, ctx);
     let main_navigation = app.is_linked()

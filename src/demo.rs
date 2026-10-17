@@ -2401,6 +2401,17 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     pairing_phone: None,
                 };
             }
+            "waiting" => {
+                // A fully offline, unpaired account waiting for its first QR.
+                // QuickChat must show onboarding and a recovery control instead
+                // of an empty launcher. No real WhatsApp request is made.
+                unlink(app);
+                app.link = LinkStatus::Unlinked {
+                    qr: None,
+                    pair_code: None,
+                    pairing_phone: None,
+                };
+            }
             "pair" => {
                 unlink(app);
                 app.link = LinkStatus::Unlinked {
@@ -4450,6 +4461,27 @@ mod tests {
         app.app_lock.release();
         let labels = accessible_labels(&mut app, &ctx);
         assert!(!leaks(&labels).is_empty());
+    }
+
+    #[test]
+    fn quickchat_first_run_renders_onboarding_without_phone_data() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.enable_quickchat_fork();
+        app.quickchat.search_with_query("Ada");
+        app.attach(&ctx);
+        apply_flags(&mut app, Some("waiting"));
+        assert!(app.quickchat_needs_link());
+        render(&mut app, &ctx);
+        assert_eq!(
+            app.quickchat.mode,
+            crate::quickchat::Mode::Search,
+            "do not lose the pending shortcut while pairing"
+        );
+
+        apply_flags(&mut app, Some("login"));
+        render(&mut app, &ctx);
+        assert!(app.quickchat_needs_link(), "synthetic QR is not a link");
     }
 
     #[test]

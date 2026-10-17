@@ -8,6 +8,7 @@
 /.cache/
 
 /dist/
+/QuickChat.app/
 
 /packaging/flatpak/built/
 /packaging/flatpak/cargo-sources.json

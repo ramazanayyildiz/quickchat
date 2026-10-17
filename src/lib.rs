@@ -30,6 +30,10 @@ pub mod paths;
 pub mod privacy;
 pub mod proxy;
 pub mod qr;
+pub mod quickchat;
+#[cfg(target_os = "macos")]
+pub mod quickchat_hotkey;
+pub mod quickchat_ui;
 pub mod safety;
 pub mod settings;
 pub mod single_instance;

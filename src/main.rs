@@ -8,7 +8,7 @@ use clap::Parser;
 
 /// A fast, native WhatsApp client.
 #[derive(Debug, Parser)]
-#[command(name = "zapfast", version, about)]
+#[command(name = "quickchat", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Control>,
@@ -19,6 +19,15 @@ struct Cli {
     /// and ZapFast keeps running in the background. For login autostart.
     #[arg(long)]
     start_hidden: bool,
+    /// Show name-based Quick Search. Can be invoked from Raycast or Shortcuts.
+    #[arg(long, conflicts_with = "target")]
+    quick: bool,
+    /// Switch to the full WhatsApp chat list (even when a compact panel is open).
+    #[arg(long, conflicts_with_all = ["quick", "quick_query", "target"])]
+    chats: bool,
+    /// Open Quick Search with a prefilled name, e.g. Raycast's "w ahmet".
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["quick", "target"])]
+    quick_query: Option<String>,
 
     /// Start with offline sample chats.
     #[cfg(feature = "demo")]
@@ -74,7 +83,8 @@ struct Cli {
     demo_macos: bool,
 
     /// Demo view: `chat`, `phone-menu`, `empty`, `settings`, `login`,
-    /// `pair`, `shortcuts`, `about`, `info`, `mention`, `light`, or a comma-separated
+    /// `waiting`, `pair`, `shortcuts`, `about`, `info`, `mention`,
+    /// `light`, or a comma-separated
     /// mix such as `chat,light`.
     #[cfg(feature = "demo")]
     #[arg(long)]
@@ -150,17 +160,18 @@ fn run() -> eframe::Result<()> {
     // `--update-receipt` and `--update-error` off the command line.
     let launch = fastframe_update::intercept(&zapfast::updates::CONFIG);
     let cli = Cli::parse_from(&launch.arguments);
-    let discovered = paths::AppDirs::discover();
+    // Fork state and socket must never overlap with an installed ZapFast.
+    let discovered = paths::AppDirs::quickchat();
     if matches!(cli.command, Some(Control::ReloadThemes)) {
-        if let Err(error) = single_instance::send(&discovered.runtime, "reload-themes") {
+        if let Err(error) = single_instance::send_quickchat(&discovered.runtime, "reload-themes") {
             use std::io::ErrorKind;
             if matches!(
                 error.kind(),
                 ErrorKind::NotFound | ErrorKind::ConnectionRefused
             ) {
-                eprintln!("ZapFast is not running, so there are no themes to reload.");
+                eprintln!("QuickChat is not running, so there are no themes to reload.");
             } else {
-                eprintln!("Could not reach the running ZapFast: {error}");
+                eprintln!("Could not reach the running QuickChat: {error}");
             }
             std::process::exit(1);
         }
@@ -170,6 +181,14 @@ fn run() -> eframe::Result<()> {
     // passes. Read before the single-instance guard, because it changes the
     // verb: a running copy is asked to open the chat instead of to show.
     let target = cli.target.as_deref().and_then(zapfast::target::parse);
+    let quick_query = cli
+        .quick_query
+        .as_deref()
+        .and_then(single_instance::normalized_quick_query);
+    if cli.quick_query.is_some() && quick_query.is_none() {
+        eprintln!("QuickChat search name must contain 1–96 visible characters.");
+        std::process::exit(2);
+    }
     if let Some(argument) = cli.target.as_deref()
         && target.is_none()
     {
@@ -188,20 +207,31 @@ fn run() -> eframe::Result<()> {
         // A hidden start must not surface a copy that is already running.
         let verb = match &target {
             Some(request) => request.verb(),
+            None if let Some(query) = &quick_query => {
+                single_instance::quick_search_verb(query).expect("validated QuickChat search text")
+            }
+            None if cli.quick => "quick".to_owned(),
+            None if cli.chats => "chats".to_owned(),
             None if cli.start_hidden => "ping".to_owned(),
             None => "show".to_owned(),
         };
-        match single_instance::acquire(&discovered.runtime, &waker, &verb) {
+        match single_instance::acquire_quickchat(&discovered.runtime, &waker, &verb) {
             single_instance::Outcome::Only(guard) => Some(guard),
-            single_instance::Outcome::Surfaced if cli.start_hidden && target.is_none() => {
-                eprintln!("ZapFast is already running");
+            single_instance::Outcome::Surfaced
+                if cli.start_hidden && target.is_none() && !cli.quick && !cli.chats && quick_query.is_none() =>
+            {
+                eprintln!("QuickChat is already running");
                 return Ok(());
             }
             single_instance::Outcome::Surfaced => {
                 eprintln!(
-                    "ZapFast or FastsApp is already running; asked it to {}",
+                    "QuickChat is already running; asked it to {}",
                     if target.is_some() {
                         "open the chat"
+                    } else if cli.quick || quick_query.is_some() {
+                        "open Quick Search"
+                    } else if cli.chats {
+                        "show all chats"
                     } else {
                         "show its window"
                     }
@@ -209,7 +239,7 @@ fn run() -> eframe::Result<()> {
                 return Ok(());
             }
             single_instance::Outcome::Unanswered => {
-                eprintln!("ZapFast is already running but did not answer");
+                eprintln!("QuickChat is already running but did not answer");
                 return Ok(());
             }
         }
@@ -226,10 +256,7 @@ fn run() -> eframe::Result<()> {
     } else {
         discovered
     };
-    if !demo {
-        dirs.adopt_previous_names()
-            .map_err(|error| eframe::Error::AppCreation(error.into()))?;
-    }
+    // Never import ZapFast/FastsApp's private directories into QuickChat.
     // Do not open logs, settings, or either database unless their parent
     // directories have been created and secured successfully.
     dirs.ensure()
@@ -254,16 +281,32 @@ fn run() -> eframe::Result<()> {
         log::error!("could not move the linked account into its folder: {error}");
         return Err(eframe::Error::AppCreation(error.into()));
     }
-    let settings = settings::Settings::load(&dirs.settings_file());
+    let mut settings = settings::Settings::load(&dirs.settings_file());
+    // Official ZapFast update artifacts must never replace a QuickChat fork.
+    settings.check_for_updates = false;
+    settings.download_updates_automatically = false;
     let demo_persistence = demo.then(|| dirs.state.join("window.ron"));
 
     #[allow(unused_mut)]
     let mut app = if demo {
         app::App::headless(dirs, settings).0
     } else {
-        app::App::new(&waker, dirs, settings, app::AppOptions { tray: true })
-            .map_err(|error| eframe::Error::AppCreation(error.into()))?
+        app::App::new(
+            &waker,
+            dirs,
+            settings,
+            app::AppOptions {
+                tray: true,
+                quickchat: true,
+            },
+        )
+        .map_err(|error| eframe::Error::AppCreation(error.into()))?
     };
+    app.enable_quickchat_fork();
+    #[cfg(feature = "demo")]
+    if demo && (cli.quick || quick_query.is_some()) {
+        app.enable_quickchat_demo_tray();
+    }
     if cli.verbose {
         app.update_arguments.push("--verbose".into());
     }
@@ -275,7 +318,13 @@ fn run() -> eframe::Result<()> {
     }
     // The first launch owns the slot, so no verb reached a running copy and
     // the chat is opened here. The app drains its queue after the frame.
+    if let Some(query) = &quick_query {
+        app.quickchat.search_with_query(query);
+    } else if cli.quick {
+        app.quickchat.search();
+    }
     if let Some(request) = &target {
+        app.quickchat.panel();
         app.actions.push(zapfast::model::Action::StartChat {
             name: request.display_name(),
             id: request.chat.clone(),
@@ -319,7 +368,7 @@ fn run() -> eframe::Result<()> {
     // named would otherwise open behind a tray nobody is looking at.
     let start_hidden = start_hidden(
         cli.start_hidden,
-        target.is_some(),
+        target.is_some() || cli.quick || cli.chats || quick_query.is_some(),
         demo,
         update_receipt.is_some(),
     );
@@ -353,9 +402,23 @@ fn run() -> eframe::Result<()> {
                         }),
                 )
             });
+            // A background shortcut or notification may request a compact
+            // window long after the original process parsed its CLI. Read
+            // the resident mode now instead of consulting that stale flag.
+            let (quick_window, setup_window) = lease.peek(|app: &app::App| {
+                (
+                    app.quickchat.mode != zapfast::quickchat::Mode::Normal && app.quickchat_ready(),
+                    app.quickchat_needs_link(),
+                )
+            });
             eframe::run_native(
-                "ZapFast",
-                native_options(demo_persistence.clone(), geometry),
+                "QuickChat",
+                native_options(
+                    demo_persistence.clone(),
+                    geometry,
+                    quick_window,
+                    setup_window,
+                ),
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
                     app.attach(&cc.egui_ctx);
@@ -482,20 +545,30 @@ fn tour_script(name: &str) -> zapfast::demo::tour::Script {
 fn native_options(
     demo_persistence: Option<std::path::PathBuf>,
     geometry: fastframe_shell::window::Geometry,
+    quick: bool,
+    setup: bool,
 ) -> eframe::NativeOptions {
-    let default_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
+    let default_size = demo_size_arg().unwrap_or(if setup {
+        [760.0, 760.0]
+    } else if quick {
+        [560.0, 470.0]
+    } else {
+        [1180.0, 780.0]
+    });
     let demo = demo_persistence.is_some();
     let viewport = egui::ViewportBuilder::default()
-        .with_title(if demo { "ZapFast Demo" } else { "ZapFast" })
+        .with_title(if demo { "QuickChat Demo" } else { "QuickChat" })
         .with_app_id(if demo {
-            "zapfast-demo".to_owned()
+            "quickchat-demo".to_owned()
         } else {
-            fastframe_desktop::desktop_entry("zapfast")
+            fastframe_desktop::desktop_entry("quickchat")
         });
     // The remembered size and position, from the settings, over the default
     // size. Demo runs keep their fixed screenshot size.
     let viewport = viewport.with_inner_size(default_size);
-    let viewport = if demo {
+    // Quick Search and single-chat panels are transient; never restore the
+    // saved full-window geometry over them, not even for a single frame.
+    let viewport = if demo || quick || setup {
         viewport
     } else {
         geometry.apply(viewport)
@@ -770,6 +843,30 @@ mod target_cli_tests {
         let cli = Cli::try_parse_from(["zapfast", "wa.me/20123456789"]).unwrap();
         assert!(cli.command.is_none());
         assert_eq!(cli.target.as_deref(), Some("wa.me/20123456789"));
+    }
+
+    #[test]
+    fn full_chats_cli_is_explicit_and_excludes_quick_search() {
+        let cli = Cli::try_parse_from(["quickchat", "--chats"]).unwrap();
+        assert!(cli.chats);
+        assert!(!cli.quick);
+        assert!(cli.quick_query.is_none());
+        assert!(cli.target.is_none());
+        assert!(Cli::try_parse_from(["quickchat", "--chats", "--quick"]).is_err());
+        assert!(Cli::try_parse_from(["quickchat", "--chats", "--quick-query", "Ada"]).is_err());
+        assert!(Cli::try_parse_from(["quickchat", "--chats", "+905555556666"]).is_err());
+    }
+
+    #[test]
+    fn raycast_name_query_and_number_link_are_mutually_exclusive() {
+        let cli = Cli::try_parse_from(["quickchat", "--quick-query", "Ahmet Yılmaz"]).unwrap();
+        assert_eq!(cli.quick_query.as_deref(), Some("Ahmet Yılmaz"));
+        assert!(!cli.quick);
+        assert!(cli.target.is_none());
+        assert!(Cli::try_parse_from(["quickchat", "--quick-query", "Ahmet", "--quick"]).is_err());
+        assert!(
+            Cli::try_parse_from(["quickchat", "--quick-query", "Ahmet", "+905555556666"]).is_err()
+        );
     }
 
     /// A launch with nothing to open still works: the target is optional.

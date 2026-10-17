@@ -19,6 +19,20 @@ pub struct AppDirs {
 }
 
 impl AppDirs {
+    /// QuickChat keeps its own state, keyring identities and runtime socket.
+    /// Never adopt the old ZapFast/FastsApp directories into this namespace.
+    pub fn quickchat() -> Self {
+        Self::of("quickchat").unwrap_or_else(|| {
+            let root = std::env::current_dir().unwrap_or_default();
+            Self {
+                config: root.join("quickchat-config"),
+                state: root.join("quickchat-state"),
+                cache: root.join("quickchat-cache"),
+                runtime: root.join("quickchat-run"),
+            }
+        })
+    }
+
     pub fn discover() -> Self {
         match Self::of("zapfast") {
             Some(dirs) => dirs,
@@ -719,5 +733,15 @@ mod tests {
         );
         assert!(!account.session_db().exists());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn quickchat_uses_a_distinct_location_from_upstream() {
+        let quick = AppDirs::quickchat();
+        let upstream = AppDirs::discover();
+        assert_ne!(quick.config, upstream.config);
+        assert_ne!(quick.state, upstream.state);
+        assert_ne!(quick.cache, upstream.cache);
+        assert_ne!(quick.runtime, upstream.runtime);
     }
 }

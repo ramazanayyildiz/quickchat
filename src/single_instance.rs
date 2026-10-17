@@ -51,6 +51,12 @@ pub enum ControlCommand {
     Ping,
     /// Opens the chat a link named, showing the window as it does.
     OpenChat(crate::target::Request),
+    /// Opens QuickChat's local, name-based search window.
+    QuickSearch,
+    /// Shows the original full conversation list and chat layout.
+    AllChats,
+    /// Prefills the local search field, never an outgoing message.
+    QuickSearchQuery(String),
 }
 
 type Queue = Arc<Mutex<Vec<ControlCommand>>>;
@@ -73,6 +79,41 @@ impl Guard {
 /// ZapFast's slot: its runtime directory, with the prefix older copies use.
 fn slot(dir: &Path) -> fastframe_instance::Slot {
     fastframe_instance::Slot::at(dir, NAME)
+}
+
+/// Separate fork identity: the QuickChat instance cannot signal, lock, or
+/// take over a running ZapFast/FastsApp instance, including its legacy port.
+fn quickchat_slot(dir: &Path) -> fastframe_instance::Slot {
+    fastframe_instance::Slot::at(dir, "quickchat")
+}
+
+/// Owns the QuickChat slot without legacy ZapFast port discovery.
+pub fn acquire_quickchat(dir: &Path, waker: &crate::backend::Waker, verb: &str) -> Outcome {
+    let commands = Queue::default();
+    let (inbox, on_request) = (Arc::clone(&commands), waker.clone());
+    match quickchat_slot(dir).claim(verb, move |request| {
+        let command = parse(request)?;
+        inbox
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(command);
+        on_request.wake();
+        Some(OK.to_owned())
+    }) {
+        fastframe_instance::Claim::First(claim) => Outcome::Only(Guard {
+            commands,
+            _claim: claim,
+        }),
+        fastframe_instance::Claim::Running(_) => Outcome::Surfaced,
+        fastframe_instance::Claim::Unanswered | fastframe_instance::Claim::Declined => {
+            Outcome::Unanswered
+        }
+    }
+}
+
+/// Send a bounded command only to the running QuickChat instance.
+pub fn send_quickchat(dir: &Path, verb: &str) -> std::io::Result<()> {
+    quickchat_slot(dir).send(verb).map(drop)
 }
 
 /// Becomes the running instance, or hands `verb` to the one already running.
@@ -131,15 +172,44 @@ pub fn send(dir: &Path, verb: &str) -> std::io::Result<()> {
     slot(dir).send(verb).map(drop)
 }
 
+/// Reject untrusted CLI/IPC text before it can become a search field.
+pub fn normalized_quick_query(query: &str) -> Option<String> {
+    let query = query.trim();
+    (!query.is_empty()
+        && query.chars().count() <= 96
+        && query.len() <= 384
+        && !query.chars().any(char::is_control))
+    .then(|| query.to_owned())
+}
+
+/// Percent-free JSON quoting prevents newline or delimiter injection in the
+/// one-line local instance protocol. No contact data ever goes to Raycast.
+pub fn quick_search_verb(query: &str) -> Option<String> {
+    let query = normalized_quick_query(query)?;
+    Some(format!(
+        "quick-search {}",
+        serde_json::to_string(&query).ok()?
+    ))
+}
+
 /// The verbs another launch may send. Anything else is declined.
 ///
 /// `open` carries the whole request, so it is read and held to the same rule
 /// [`crate::target::parse`] applies rather than being trusted as it arrives.
 fn parse(verb: &str) -> Option<ControlCommand> {
+    if let Some(encoded) = verb.strip_prefix("quick-search ") {
+        if encoded.len() > 600 {
+            return None;
+        }
+        let query: String = serde_json::from_str(encoded).ok()?;
+        return normalized_quick_query(&query).map(ControlCommand::QuickSearchQuery);
+    }
     if let Some(request) = verb.strip_prefix("open ") {
         return crate::target::Request::from_verb(request).map(ControlCommand::OpenChat);
     }
     match verb {
+        "chats" => Some(ControlCommand::AllChats),
+        "quick" => Some(ControlCommand::QuickSearch),
         "show" => Some(ControlCommand::Show),
         "reload-themes" => Some(ControlCommand::ReloadThemes),
         "ping" => Some(ControlCommand::Ping),
@@ -260,6 +330,12 @@ mod tests {
     #[test]
     fn only_our_own_verbs_are_understood() {
         assert_eq!(parse("show"), Some(ControlCommand::Show));
+        assert_eq!(parse("chats"), Some(ControlCommand::AllChats));
+        assert_eq!(parse("quick"), Some(ControlCommand::QuickSearch));
+        assert_eq!(
+            parse(&quick_search_verb("  Ahmet Yılmaz  ").unwrap()),
+            Some(ControlCommand::QuickSearchQuery("Ahmet Yılmaz".into()))
+        );
         assert_eq!(parse("ping"), Some(ControlCommand::Ping));
         assert_eq!(parse("reload-themes"), Some(ControlCommand::ReloadThemes));
         assert_eq!(
@@ -282,6 +358,20 @@ mod tests {
         assert_eq!(parse("GET / HTTP/1.1"), None);
         assert_eq!(parse("frobnicate"), None);
         assert_eq!(parse(""), None);
+        // Untrusted local IPC never interprets a name as a send command,
+        // newline-delimited second command, or arbitrary unbounded text.
+        assert!(quick_search_verb("Ahmet\nshow").is_none());
+        assert!(quick_search_verb("  ").is_none());
+        assert!(quick_search_verb(&"a".repeat(97)).is_none());
+        assert_eq!(parse("quick-search \"Ahmet\nshow\""), None);
+        assert_eq!(parse("quick-search \"Ahmet\"\nshow"), None);
+        assert_eq!(parse("quick-search 123"), None);
+        assert_eq!(
+            parse(&quick_search_verb("O'Connor \"Satış\"").unwrap()),
+            Some(ControlCommand::QuickSearchQuery(
+                "O'Connor \"Satış\"".into()
+            ))
+        );
     }
 
     fn connect(port: u16) -> TcpStream {
@@ -380,5 +470,38 @@ mod tests {
             ]
         );
         drop(first);
+    }
+
+    #[test]
+    fn quickchat_has_its_own_runtime_slot_and_search_verb() {
+        let root = tempfile::tempdir().unwrap();
+        let quick = root.path().join("quickchat-run");
+        let zapfast = root.path().join("zapfast-run");
+        let waker = crate::backend::Waker::default();
+
+        let Outcome::Only(owner) = acquire_quickchat(&quick, &waker, "ping") else {
+            panic!("QuickChat should own a fresh private slot");
+        };
+        send_quickchat(&quick, "quick").expect("the launcher command reaches QuickChat");
+        let filtered = quick_search_verb("Proje Ekibi").unwrap();
+        send_quickchat(&quick, &filtered).expect("a name reaches QuickChat without contact data");
+        assert!(matches!(
+            acquire_quickchat(&quick, &waker, "quick"),
+            Outcome::Surfaced
+        ));
+        assert_eq!(
+            owner.commands().lock().unwrap().as_slice(),
+            &[
+                ControlCommand::QuickSearch,
+                ControlCommand::QuickSearchQuery("Proje Ekibi".into()),
+                ControlCommand::QuickSearch
+            ]
+        );
+
+        let queue = Queue::default();
+        assert!(matches!(
+            claim(&zapfast, "show", &queue, &waker),
+            fastframe_instance::Claim::First(_)
+        ));
     }
 }
