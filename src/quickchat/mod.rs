@@ -96,6 +96,11 @@ fn key(value: &str) -> String {
     crate::util::search_key(value).replace('ı', "i")
 }
 
+/// Whether two names read the same to the search.
+pub fn same_name(a: &str, b: &str) -> bool {
+    key(a) == key(b)
+}
+
 fn relevance(name: &str, words: &[&str], needle: &str) -> Option<u8> {
     let normalized = key(name);
     if words.is_empty() {

@@ -11724,7 +11724,7 @@ mod tests {
             .push(crate::notify::NotificationTarget {
                 account: AccountId::parse("2").unwrap(),
                 chat: chat.into(),
-                message: "message-2".into(),
+                message: Some("message-2".into()),
             });
         app.handle_notification_opens();
         app.apply_actions(&ctx);
@@ -11747,7 +11747,7 @@ mod tests {
             .push(crate::notify::NotificationTarget {
                 account: AccountId::parse("3").unwrap(),
                 chat: chat.into(),
-                message: "stale".into(),
+                message: Some("stale".into()),
             });
         app.handle_notification_opens();
         app.apply_actions(&ctx);
@@ -21242,6 +21242,7 @@ mod app_lock_tests {
             Action::StartChat {
                 id: CHAT.into(),
                 name: "Ada Lovelace".into(),
+                dismiss_dialog: true,
             },
             &ctx,
         );

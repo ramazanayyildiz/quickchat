@@ -205,10 +205,11 @@ fn waiting_for_pairing(app: &mut App, ui: &mut egui::Ui, phase: &'static str) {
             now
         }
     });
-    // The login view repaints while awaiting protocol events; the countdown
-    // is purely local and never starts a background network poll.
-    ui.ctx().request_repaint_after(Duration::from_secs(1));
-    if now - since < 15.0 {
+    // One local wake when the retry is due; never a network poll.
+    let left = 15.0 - (now - since);
+    if left > 0.0 {
+        ui.ctx()
+            .request_repaint_after(Duration::from_secs_f64(left));
         return;
     }
     ui.add_space(12.0);

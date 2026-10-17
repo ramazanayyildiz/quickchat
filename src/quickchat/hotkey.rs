@@ -24,6 +24,11 @@ pub fn status() -> &'static str {
     }
 }
 
+/// Why the shortcut does not work, when it does not.
+pub fn problem() -> Option<&'static str> {
+    (STATUS.load(Ordering::Acquire) == 3).then_some("⌃⌥W is taken: use the menu bar icon")
+}
+
 /// Keeps the Carbon registration alive until the process exits.
 pub struct Registration {
     _manager: GlobalHotKeyManager,

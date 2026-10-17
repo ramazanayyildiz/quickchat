@@ -2999,6 +2999,12 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     pairing_phone: None,
                 };
             }
+            "quick-panel" => {
+                // QuickChat's one-chat panel over the sample's first chat.
+                app.enable_quickchat_fork();
+                app.quickchat.panel();
+                app.open_chat = Some(SAMPLES[0].id.to_owned());
+            }
             "waiting" => {
                 // A fully offline, unpaired account waiting for its first QR.
                 // QuickChat must show onboarding and a recovery control instead

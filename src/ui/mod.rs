@@ -60,16 +60,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     if app.quickchat_compact() {
         let quick_mode = app.quickchat.mode;
-        titlebar_strip(app, ui);
+        if quick_mode == crate::quickchat::Mode::Panel {
+            // The chat's own keys, before its widgets, as in the full window.
+            crate::quickchat::ui::panel_keys(app, ctx);
+        }
         crate::quickchat::ui::show(app, ui);
         if quick_mode == crate::quickchat::Mode::Panel {
-            // Keep ordinary composer shortcuts and cancellation behavior.
-            // The panel itself consumes Esc only when there is no modal state.
-            keys::handle(app, ctx);
             picker::show(app, ctx);
             dialogs::show(app, ctx);
             image_preview::show(app, ctx);
-            video_preview::show(app, ctx);
             drop_target(app, ui);
         }
         toasts(app, ctx);

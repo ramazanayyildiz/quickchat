@@ -504,8 +504,8 @@ mod tests {
                     continue;
                 }
                 let line = line.trim_end().to_owned();
-                if line == "fastsapp:show" {
-                    let _ = (&stream).write_all(b"fastsapp:ok\n");
+                if line == format!("{NAME}:show") {
+                    let _ = (&stream).write_all(format!("{NAME}:ok\n").as_bytes());
                 }
                 record.lock().unwrap().push(line);
             }
@@ -513,8 +513,8 @@ mod tests {
         let outcome = acquire(&dir, &crate::backend::Waker::default(), INVITE);
         assert!(matches!(outcome, Outcome::Outdated));
         let seen = seen.lock().unwrap();
-        assert_eq!(seen.last().map(String::as_str), Some("fastsapp:show"));
-        assert!(seen.iter().any(|line| line == &format!("{PREFIX}{INVITE}")));
+        assert_eq!(seen.last(), Some(&format!("{NAME}:show")));
+        assert!(seen.iter().any(|line| line == &format!("{NAME}:{INVITE}")));
         drop(lock);
     }
 

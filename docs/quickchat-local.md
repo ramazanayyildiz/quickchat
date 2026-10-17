@@ -29,8 +29,17 @@ Current pilot includes:
   Turkish accented names case-insensitively. Message contents are not indexed.
 - Locked conversations are excluded; unresolved privacy-ID-only contacts are
   not offered as new chats.
-- Enter opens the selected conversation in a right-side narrow window.
-- Escape closes the panel while the WhatsApp connection stays resident.
+- With an empty field the launcher lists recent chats; arrow keys wrap
+  around the list and Enter opens the selected conversation in a narrow
+  panel at the right of the screen.
+- In the launcher, Escape clears a typed name first and closes on the next
+  press. In the panel it cancels whatever is in progress (a reply, a
+  dialog, a selection) and otherwise hides the panel; the chat header's
+  Back arrow returns to the search. The WhatsApp connection stays resident.
+- Clicking the menu-bar icon opens its menu: Quick Search, Open QuickChat
+  (the full window, brought to the front), Lock and Quit. While the full
+  window is open QuickChat has a Dock icon and appears in Cmd-Tab; with only
+  the launcher, the panel or no window it is a menu-bar utility again.
 - A click on a macOS message notification requests the panel for that message.
 - Automatic/manual vendor application update installation is disabled in the fork.
 
@@ -100,6 +109,16 @@ typing `w ahmet` and pressing Enter opens QuickChat with `ahmet` in the
 local search field. This is a launcher, **not** an extension that lists contacts
 inside Raycast. It neither reads the archive nor outputs the contact list.
 No remote service is required.
+
+## Upgrading from the first pilot
+
+The pilot used the bundle identifier `app.quickchat.desktop`; QuickChat now
+uses `io.github.ramazanayyildiz.quickchat`. Your linked session, archive and
+Keychain key are unchanged (they never depended on it), but macOS treats it
+as a new app: allow notifications again in System Settings. If you had
+turned on start at login, delete
+`~/Library/LaunchAgents/app.quickchat.desktop.plist` and turn the setting
+on again.
 
 ## Open the full conversations window
 

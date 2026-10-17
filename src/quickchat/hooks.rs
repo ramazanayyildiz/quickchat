@@ -18,9 +18,6 @@ pub(crate) fn tray_config(lockable: bool) -> fastframe_tray::Config {
     let mut config = crate::app::tray_config(lockable);
     config.id = "quickchat";
     config.title = "QuickChat".into();
-    // A click opens the menu. A toggle would hide a window that is open
-    // behind other apps, which is the opposite of what the click wanted.
-    config.menu_on_click = true;
     config.menu = vec![
         MenuItem::action(TRAY_QUICK, "Quick Search (⌃⌥W)"),
         MenuItem::action(TRAY_ALL_CHATS, "Open QuickChat"),
