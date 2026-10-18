@@ -213,6 +213,17 @@ can collect the eligible ones; review the output first. When mbx is absent,
 check whether Cargo is running through `mise exec -- cargo ...` before
 building again. No deletion is performed by QuickChat.
 
+mbx caps whole build folders but leaves the one in use alone, and on macOS
+that one still grows: a debug build keeps its debug info in separate `.o`
+files beside the binaries (`split-debuginfo = "unpacked"`), and every
+rebuild of the app leaves a new set while the old ones stay. After a long
+session they can pass 20 GB. They are only debug info, so removing them
+costs a debugger its symbols until the next build, and nothing rebuilds:
+
+```sh
+find "$(cd target && pwd -P)/debug/deps" -maxdepth 1 -name '*.rcgu.o' -delete
+```
+
 ## Live WhatsApp validation, separate opt-in
 
 Do not attempt this while the synthetic demo process is still open. This
