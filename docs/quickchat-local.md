@@ -133,6 +133,26 @@ local search field. This is a launcher, **not** an extension that lists contacts
 inside Raycast. It neither reads the archive nor outputs the contact list.
 No remote service is required.
 
+## Everyday build
+
+For daily use, build the optimized app and install it in `~/Applications`
+(quit a running QuickChat first; the script refuses otherwise):
+
+```sh
+packaging/macos/quickchat/release.sh
+open ~/Applications/QuickChat.app
+```
+
+It signs with the keychain's Developer ID Application identity when there
+is one (or `CODESIGN_IDENTITY`), else ad hoc. With a stable signature the
+Keychain approval ("Always Allow") and the notification permission survive
+rebuilds; an ad-hoc signature changes with every build, so macOS asks again.
+The first launch after switching signatures asks once more. The bundle is
+not notarized: that matters only for copies downloaded on other Macs.
+
+The Raycast script prefers this installed copy when QuickChat is not
+running; a running QuickChat takes the request whichever copy sends it.
+
 ## Upgrading from the first pilot
 
 The pilot used the bundle identifier `app.quickchat.desktop`; QuickChat now

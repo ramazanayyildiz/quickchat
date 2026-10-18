@@ -15,16 +15,17 @@ app="$HOME/Applications/QuickChat.app/Contents/MacOS/quickchat"
 system_app="/Applications/QuickChat.app/Contents/MacOS/quickchat"
 project_app="$HOME/CODE/Ram/quickchat/QuickChat.app/Contents/MacOS/quickchat"
 
-# Development bundle first, so an older installed copy cannot swallow the
-# new --quick-query argument during testing. Never a bare target/ binary:
-# without the quickchat feature that is ZapFast.
+# A running QuickChat takes the request whichever copy sends it, so the
+# order only picks what starts when none runs: the installed app first
+# (release.sh puts it in ~/Applications), the development bundle last.
+# Never a bare target/ binary: without the quickchat feature that is ZapFast.
 if [ -n "${1:-}" ]; then
   args=(--quick-query "$1")
 else
   args=(--quick)
 fi
 
-for bin in "$project_app" "$app" "$system_app"; do
+for bin in "$app" "$system_app" "$project_app"; do
   if [ -x "$bin" ]; then
     # QuickChat is a resident app: Raycast must not wait for the GUI process.
     # If an instance is already running, this child forwards the request to it.
