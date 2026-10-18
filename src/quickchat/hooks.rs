@@ -5,21 +5,30 @@
 use crate::app::{App, TRAY_LOCK, TRAY_QUIT};
 use crate::backend::LinkStatus;
 use crate::model::Action;
+use crate::settings::QuickShortcut;
 
 use super::Mode;
 
 pub(crate) const TRAY_QUICK: &str = "quick-search";
 pub(crate) const TRAY_ALL_CHATS: &str = "all-chats";
 
+/// The tray's launcher entry, naming the shortcut when there is one.
+fn quick_label(shortcut: QuickShortcut) -> String {
+    match shortcut {
+        QuickShortcut::Off => "Quick Search".to_owned(),
+        other => format!("Quick Search ({})", other.symbols()),
+    }
+}
+
 /// The tray menu, with a launcher entry for when the shortcut is taken by
 /// another app.
-pub(crate) fn tray_config(lockable: bool) -> fastframe_tray::Config {
+pub(crate) fn tray_config(lockable: bool, shortcut: QuickShortcut) -> fastframe_tray::Config {
     use fastframe_tray::MenuItem;
     let mut config = crate::app::tray_config(lockable);
     config.id = "quickchat";
     config.title = "QuickChat".into();
     config.menu = vec![
-        MenuItem::action(TRAY_QUICK, "Quick Search (⌃⌥W)"),
+        MenuItem::action(TRAY_QUICK, quick_label(shortcut)),
         MenuItem::action(TRAY_ALL_CHATS, "Open QuickChat"),
         MenuItem::Separator,
         MenuItem::action(TRAY_LOCK, "Lock QuickChat").visible(lockable),
@@ -42,15 +51,37 @@ impl App {
         self.enable_quickchat_fork();
         if self.tray.is_none() {
             let wake = self.waker.clone();
-            self.tray =
-                fastframe_tray::Tray::spawn(tray_config(self.tray_lockable), move || wake.wake());
+            self.tray = fastframe_tray::Tray::spawn(
+                tray_config(self.tray_lockable, self.settings.quickchat_shortcut),
+                move || wake.wake(),
+            );
         }
     }
 
     #[cfg(all(target_os = "macos", feature = "quickchat"))]
     pub(crate) fn ensure_quickchat_hotkey(&mut self) {
-        if self.fork_mode && self.quickchat_hotkey.is_none() {
-            self.quickchat_hotkey = super::hotkey::register(&self.waker);
+        // A test must never take a shortcut from the desktop it runs on.
+        if self.fork_mode && self.quickchat_hotkey.is_none() && !cfg!(test) {
+            self.quickchat_hotkey =
+                super::hotkey::register(&self.waker, self.settings.quickchat_shortcut);
+        }
+    }
+
+    /// Saves the launcher shortcut and puts it into effect at once, along
+    /// with the tray entry that names it.
+    pub(crate) fn set_quickchat_shortcut(&mut self, shortcut: QuickShortcut) {
+        self.settings.quickchat_shortcut = shortcut;
+        self.mark_settings_dirty();
+        // Only a running registration changes: the window registers the
+        // shortcut when it starts, and tests never do.
+        #[cfg(all(target_os = "macos", feature = "quickchat"))]
+        if let Some(registration) = self.quickchat_hotkey.as_mut() {
+            registration.set(shortcut);
+        }
+        if self.fork_mode
+            && let Some(tray) = self.tray.as_mut()
+        {
+            tray.set_label(TRAY_QUICK, quick_label(shortcut));
         }
     }
 
@@ -129,7 +160,7 @@ mod tests {
     #[test]
     fn the_menu_has_a_launcher_for_when_the_shortcut_is_taken() {
         use fastframe_tray::MenuItem;
-        let config = tray_config(false);
+        let config = tray_config(false, QuickShortcut::default());
         assert_eq!(config.id, "quickchat");
         assert_eq!(config.title, "QuickChat");
         assert_eq!(

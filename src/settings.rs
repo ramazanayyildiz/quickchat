@@ -351,6 +351,47 @@ impl AutoLock {
     }
 }
 
+/// QuickChat's shortcut for its launcher, on macOS. A few combinations
+/// rather than recorded keys: each is one macOS leaves free by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickShortcut {
+    #[default]
+    ControlOptionW,
+    ControlOptionSpace,
+    OptionSpace,
+    ControlOptionK,
+    Off,
+}
+
+impl QuickShortcut {
+    pub const ALL: [QuickShortcut; 5] = [
+        Self::ControlOptionW,
+        Self::ControlOptionSpace,
+        Self::OptionSpace,
+        Self::ControlOptionK,
+        Self::Off,
+    ];
+
+    /// The keys as macOS menus write them; empty when off.
+    pub fn symbols(self) -> &'static str {
+        match self {
+            Self::ControlOptionW => "⌃⌥W",
+            Self::ControlOptionSpace => "⌃⌥Space",
+            Self::OptionSpace => "⌥Space",
+            Self::ControlOptionK => "⌃⌥K",
+            Self::Off => "",
+        }
+    }
+
+    pub fn label(self, locale: crate::i18n::Locale) -> std::borrow::Cow<'static, str> {
+        match self {
+            Self::Off => crate::i18n::gettext(locale, "Off"),
+            other => other.symbols().into(),
+        }
+    }
+}
+
 /// Which chats show one notification, then stay quiet for ten minutes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -531,6 +572,8 @@ pub struct Settings {
     pub app_lock_hash: Option<String>,
     /// How long ZapFast may go unused before the app lock locks it.
     pub app_lock_after: AutoLock,
+    /// QuickChat's launcher shortcut; ZapFast has no launcher and ignores it.
+    pub quickchat_shortcut: QuickShortcut,
     /// Last window width in logical pixels (points at zoom 1), remembered
     /// across restarts; see [`fastframe_shell::window::Geometry`]. `None`
     /// uses the default size.
@@ -598,6 +641,7 @@ impl Default for Settings {
             chat_lock_hint_dismissed: false,
             app_lock_hash: None,
             app_lock_after: AutoLock::default(),
+            quickchat_shortcut: QuickShortcut::default(),
             window_width: None,
             window_height: None,
             window_x: None,

@@ -22,6 +22,11 @@ Current pilot includes:
   15 seconds, with a phone-number pairing option where applicable.
 - **Control+Option+W** opens the built-in name search while QuickChat runs
   as a bundled app. The bundle is a menu-bar utility without a Dock icon.
+  Settings > System > Quick Search shortcut picks another combination
+  (⌃⌥Space, ⌥Space, ⌃⌥K) or turns it off; the change applies at once and
+  the menu-bar entry names the current one. When another app holds the
+  chosen keys, the launcher's footer says so. Settings hides ZapFast's update
+  switches, since QuickChat turns updates off.
 - **`quickchat --quick`** opens the same search, including from Raycast.
 - **`quickchat --quick-query "Ahmet"`** opens it with a name filter already
   filled. The query is never converted to an automatic recipient or message.

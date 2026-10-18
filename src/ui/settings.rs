@@ -681,15 +681,42 @@ fn sections(app: &App) -> Vec<Section> {
             },
         );
     }
-    system.toggle(
-        translated(locale, "Check for updates"),
-        translated(
-            locale,
-            "Asks GitHub once a day, sending only the ZapFast version.",
-        ),
-        |settings| &mut settings.check_for_updates,
-    );
-    system.toggle(
+    if app.fork_mode {
+        system.row(
+            translated(locale, "Quick Search shortcut"),
+            translated(locale, "Opens QuickChat's launcher from any app."),
+            move |ui, app| {
+                let selected = app.settings.quickchat_shortcut;
+                let response = egui::ComboBox::from_id_salt("quickchat_shortcut")
+                    .selected_text(selected.label(app.locale))
+                    .width(200.0_f32.min(ui.available_width()))
+                    .show_ui(ui, |ui| {
+                        for shortcut in crate::settings::QuickShortcut::ALL {
+                            if theme_option(
+                                ui,
+                                &palette,
+                                shortcut.label(app.locale).as_ref(),
+                                shortcut == selected,
+                            ) {
+                                app.actions.push(Action::SetQuickShortcut(shortcut));
+                            }
+                        }
+                    });
+                theme::reveal_focus(&response.response);
+            },
+        );
+    }
+    // QuickChat turns updates off; ZapFast's releases are not its own.
+    if !app.fork_mode {
+        system.toggle(
+            translated(locale, "Check for updates"),
+            translated(
+                locale,
+                "Asks GitHub once a day, sending only the ZapFast version.",
+            ),
+            |settings| &mut settings.check_for_updates,
+        );
+        system.toggle(
         translated(locale, "Download updates automatically"),
         translated(
             locale,
@@ -697,6 +724,7 @@ fn sections(app: &App) -> Vec<Section> {
         ),
         |settings| &mut settings.download_updates_automatically,
     );
+    }
     let environment = app
         .settings
         .proxy
@@ -2109,6 +2137,37 @@ mod tests {
             |settings| &mut settings.group_sounds,
         );
         window
+    }
+
+    fn all_titles(app: &App) -> Vec<String> {
+        let filter = Filter::new("");
+        sections(app)
+            .into_iter()
+            .flat_map(|section| titles(section, &filter))
+            .collect()
+    }
+
+    /// QuickChat offers its shortcut and hides ZapFast's updates, which it
+    /// turns off; ZapFast is unchanged.
+    #[test]
+    fn quickchat_shows_its_shortcut_instead_of_updates() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = App::headless(
+            crate::paths::AppDirs::under(root.path()),
+            Settings::default(),
+        )
+        .0;
+        let zapfast = all_titles(&app);
+        assert!(zapfast.iter().any(|title| title == "Check for updates"));
+        assert!(!zapfast.iter().any(|title| title == "Quick Search shortcut"));
+        app.enable_quickchat_fork();
+        let quickchat = all_titles(&app);
+        assert!(
+            quickchat
+                .iter()
+                .any(|title| title == "Quick Search shortcut")
+        );
+        assert!(!quickchat.iter().any(|title| title.contains("updates")));
     }
 
     #[test]

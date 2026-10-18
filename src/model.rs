@@ -2823,6 +2823,8 @@ pub enum Action {
     SubmitAppLockForm,
     /// How long ZapFast may go unused before it locks.
     SetAutoLock(crate::settings::AutoLock),
+    /// Changes QuickChat's launcher shortcut, or turns it off.
+    SetQuickShortcut(crate::settings::QuickShortcut),
     Reconnect,
     /// Sets aside an archive whose key is gone and links again.
     StartOverArchive,

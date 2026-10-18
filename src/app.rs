@@ -1181,7 +1181,7 @@ impl App {
         if options.tray {
             let waker = waker.clone();
             let menu = if crate::identity::QUICKCHAT {
-                crate::quickchat::tray_config(app.tray_lockable)
+                crate::quickchat::tray_config(app.tray_lockable, app.settings.quickchat_shortcut)
             } else {
                 tray_config(app.tray_lockable)
             };
@@ -8294,6 +8294,7 @@ impl App {
                     self.app_lock.form = None;
                 }
             }
+            Action::SetQuickShortcut(shortcut) => self.set_quickchat_shortcut(shortcut),
             Action::SetAutoLock(after) => {
                 self.settings.app_lock_after = after;
                 self.app_lock.note_input();
@@ -11815,6 +11816,19 @@ mod tests {
         )));
         assert_eq!(app.composer, "half written");
         assert_eq!(app.editing.as_deref(), Some("being-edited"));
+    }
+
+    /// A new shortcut is saved, and Off is a choice like any other.
+    #[test]
+    fn the_quick_search_shortcut_is_saved() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::headless(AppDirs::under(directory.path()), Settings::default()).0;
+        app.enable_quickchat_fork();
+        let ctx = egui::Context::default();
+        for shortcut in crate::settings::QuickShortcut::ALL {
+            app.apply(Action::SetQuickShortcut(shortcut), &ctx);
+            assert_eq!(app.settings.quickchat_shortcut, shortcut);
+        }
     }
 
     /// A chat that does not take our messages gets nothing.

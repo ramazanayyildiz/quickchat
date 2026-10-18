@@ -276,10 +276,10 @@ fn footer(app: &App, ui: &mut egui::Ui, hints: &str) {
         palette.dim,
     );
     #[cfg(all(target_os = "macos", feature = "quickchat"))]
-    if let Some(problem) = super::hotkey::problem() {
-        let galley =
-            ui.painter()
-                .layout_no_wrap(problem.to_owned(), theme::regular(12.0), palette.warning);
+    if let Some(problem) = super::hotkey::problem(app.settings.quickchat_shortcut) {
+        let galley = ui
+            .painter()
+            .layout_no_wrap(problem, theme::regular(12.0), palette.warning);
         ui.painter().galley(
             pos2(
                 rect.right() - 20.0 - galley.size().x,
