@@ -1,5 +1,6 @@
-//! QuickChat's name-only launcher index. No archive access and no message text.
-//! The resident process already holds contacts/chats for each linked account.
+//! QuickChat's launcher index: names from the contacts and chats each linked
+//! account already holds, and message hits from its local archive search.
+//! Nothing here leaves the process.
 
 use std::collections::{HashMap, HashSet};
 
@@ -64,6 +65,8 @@ pub struct State {
     /// The unread chat count the menu-bar icon last showed. Not part of the
     /// launcher, so hiding it keeps this.
     pub(crate) tray_unread: Option<u32>,
+    /// The text the launcher last searched messages for.
+    pub(crate) searched: String,
 }
 
 impl Default for State {
@@ -79,6 +82,7 @@ impl Default for State {
             focus_message: false,
             last_compose: None,
             tray_unread: None,
+            searched: String::new(),
         }
     }
 }
@@ -137,6 +141,7 @@ impl State {
         self.message.clear();
         self.last_compose = None;
         self.focus_message = false;
+        self.searched.clear();
     }
 }
 
@@ -144,6 +149,23 @@ fn key(value: &str) -> String {
     // ZapFast already strips combining accents, but Turkish dotless ı
     // needs an additional fold for Latin-keyboard name searches.
     crate::util::search_key(value).replace('ı', "i")
+}
+
+/// What the launcher calls `chat` in `account`: a group's subject, else the
+/// contact's name, as the name search does.
+pub fn chat_name(account: &Account, chat: &str) -> String {
+    let named = account.chats.iter().find(|candidate| candidate.id == chat);
+    if let Some(group) = named.filter(|chat| chat.kind == ChatKind::Group) {
+        return group.name.clone();
+    }
+    account
+        .contacts
+        .get(chat)
+        .and_then(Contact::display_name)
+        .map(str::to_owned)
+        .or_else(|| named.map(|chat| chat.name.clone()))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| chat.split('@').next().unwrap_or(chat).to_owned())
 }
 
 /// Whether two names read the same to the search.

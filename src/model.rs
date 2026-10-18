@@ -2227,6 +2227,9 @@ pub enum Action {
     Open(Page),
     /// Leave Quick Search/one-chat mode and show the full conversation list.
     ShowAllChats,
+    /// Searches every account's messages for QuickChat's launcher; empty
+    /// clears the results.
+    QuickSearchMessages(String),
     /// Sends text from QuickChat's launcher without opening the chat: the
     /// chat's draft, and an edit under way in the open chat, stay as they are.
     QuickSend {

@@ -52,6 +52,9 @@ pub struct Account {
     pub search: String,
     pub search_selected: Option<ChatId>,
     pub search_hits: Vec<Message>,
+    /// Messages matching QuickChat's launcher search, apart from the chat
+    /// list's own search.
+    pub quick_hits: Vec<Message>,
     pub typing: HashMap<ChatId, Vec<(String, Instant)>>,
     pub presence: HashMap<String, crate::app::Presence>,
     pub account_receipts_off: bool,
@@ -167,6 +170,7 @@ impl Account {
             search: String::new(),
             search_selected: None,
             search_hits: Vec::new(),
+            quick_hits: Vec::new(),
             typing: HashMap::new(),
             presence: HashMap::new(),
             account_receipts_off: false,

@@ -31,7 +31,12 @@ Current pilot includes:
 - **`quickchat --quick-query "Ahmet"`** opens it with a name filter already
   filled. The query is never converted to an automatic recipient or message.
 - Search over synced person names, group titles and available contacts; matches
-  Turkish accented names case-insensitively. Message contents are not indexed.
+  Turkish accented names case-insensitively.
+- From two typed characters the launcher also lists matching messages
+  under **Messages**, newest first, with the chat, the sender in a group and
+  the matching line. It is the same local archive search as the chat list's,
+  run in every linked account; locked chats stay out. Enter opens the panel
+  at that message. Nothing leaves the Mac.
 - Locked conversations are excluded; unresolved privacy-ID-only contacts are
   not offered as new chats.
 - With an empty field the launcher lists recent chats, unread ones first,

@@ -3423,12 +3423,16 @@ impl App {
                 }
             }
             Event::SearchHits { query, messages } => {
+                // Locked chats' messages stay out of plain search.
+                let messages: Vec<_> = messages
+                    .into_iter()
+                    .filter(|message| self.chat(&message.chat).is_none_or(|chat| !chat.locked))
+                    .collect();
+                if self.fork_mode && query == self.quickchat.searched {
+                    self.quick_hits = messages.clone();
+                }
                 if query == self.search.trim() {
-                    // Locked chats' messages stay out of plain search.
-                    self.search_hits = messages
-                        .into_iter()
-                        .filter(|message| self.chat(&message.chat).is_none_or(|chat| !chat.locked))
-                        .collect();
+                    self.search_hits = messages;
                 }
             }
             Event::Incoming { chat, message } => self.maybe_notify(&chat, &message),
@@ -8309,6 +8313,7 @@ impl App {
                 self.quit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+            Action::QuickSearchMessages(query) => self.search_quick_messages(query),
             Action::QuickSend {
                 account,
                 chat,
@@ -11817,6 +11822,27 @@ mod tests {
         )));
         assert_eq!(app.composer, "half written");
         assert_eq!(app.editing.as_deref(), Some("being-edited"));
+    }
+
+    /// The launcher's message search asks every account and forgets earlier
+    /// answers; an empty search asks nothing.
+    #[test]
+    fn quick_message_search_asks_every_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, mut commands) = two_accounts(directory.path());
+        app.enable_quickchat_fork();
+        let old = message("15550003333@s.whatsapp.net", "old-hit", 1);
+        app.accounts[1].quick_hits = vec![old.clone()];
+        let ctx = egui::Context::default();
+        app.apply(Action::QuickSearchMessages("dinner".into()), &ctx);
+        assert!(app.accounts[1].quick_hits.is_empty());
+        assert!(std::iter::from_fn(|| commands.try_recv().ok()).any(
+            |command| matches!(command, Command::SearchMessages { query } if query == "dinner")
+        ));
+        app.accounts[1].quick_hits = vec![old];
+        app.apply(Action::QuickSearchMessages(String::new()), &ctx);
+        assert!(app.accounts[1].quick_hits.is_empty());
+        assert!(commands.try_recv().is_err());
     }
 
     /// A new shortcut is saved, and Off is a choice like any other.

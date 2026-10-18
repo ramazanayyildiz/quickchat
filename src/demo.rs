@@ -3013,6 +3013,23 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     app.quickchat.message = "Running five minutes late, start without me".into();
                 }
             }
+            "quick-messages" => {
+                // QuickChat's launcher with name and message results; the
+                // archive's answer is filled in from the sample's messages.
+                app.enable_quickchat_fork();
+                let query = "meet";
+                app.quickchat.search_with_query(query);
+                app.quickchat.searched = query.to_owned();
+                let mut hits: Vec<_> = app
+                    .conversations
+                    .values()
+                    .flat_map(|conversation| conversation.messages.iter())
+                    .filter(|message| message.text_matching(query).is_some())
+                    .cloned()
+                    .collect();
+                hits.sort_by_key(|message| std::cmp::Reverse(message.timestamp));
+                app.quick_hits = hits;
+            }
             "quick-panel" => {
                 // QuickChat's one-chat panel over the sample's first chat.
                 app.enable_quickchat_fork();
@@ -5889,6 +5906,7 @@ mod tests {
             "quick-search",
             "quick-search,light",
             "quick-compose",
+            "quick-messages",
             "quick-panel",
         ] {
             let mut app = app();
@@ -5898,6 +5916,30 @@ mod tests {
             render(&mut app, &ctx);
             assert!(app.quickchat_compact(), "{page}");
         }
+    }
+
+    /// Enter on a message the search found opens the panel at it.
+    #[test]
+    fn quickchat_opens_a_found_message_in_the_panel() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        apply_flags(&mut app, Some("quick-messages"));
+        render(&mut app, &ctx);
+        let found = app.quick_hits[0].clone();
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Panel);
+        assert_eq!(app.open_chat.as_deref(), Some(found.chat.as_str()));
     }
 
     /// Tab writes to the selected chat, Escape goes back with the text kept,

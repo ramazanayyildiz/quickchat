@@ -67,6 +67,22 @@ impl App {
         }
     }
 
+    /// Asks every account's archive for messages matching the launcher's
+    /// search. The answers land in each account's `quick_hits`.
+    pub(crate) fn search_quick_messages(&mut self, query: String) {
+        self.quickchat.searched = query.clone();
+        for account in &mut self.accounts {
+            account.quick_hits.clear();
+            if !query.is_empty() {
+                account
+                    .backend
+                    .send(crate::backend::Command::SearchMessages {
+                        query: query.clone(),
+                    });
+            }
+        }
+    }
+
     /// Marks the menu-bar icon while any chat is unread, as the Dock badge
     /// would if QuickChat kept one, and names the count in its tooltip.
     pub(crate) fn sync_quickchat_tray(&mut self) {

@@ -4,7 +4,7 @@
 use egui::{Align, Layout, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
 
 use crate::app::App;
-use crate::model::{Action, Page};
+use crate::model::{AccountId, Action, Contact, Message, Page};
 use crate::quickchat::{self, Hit, Kind, Mode};
 use crate::theme::{self, Icon};
 use crate::ui::widgets;
@@ -291,6 +291,43 @@ fn footer(app: &App, ui: &mut egui::Ui, hints: &str) {
     }
 }
 
+/// One line of the launcher's list: a chat or contact by name, or a message
+/// whose text matched.
+#[derive(Clone)]
+enum Row {
+    Name(Hit),
+    Message(AccountId, Box<Message>),
+}
+
+/// The fewest characters a message search runs for: one letter matches
+/// nearly every message.
+const MESSAGE_SEARCH_MIN: usize = 2;
+const MESSAGE_LIMIT: usize = 20;
+
+/// The newest matching messages across accounts, outside locked chats.
+fn message_hits(app: &App) -> Vec<(AccountId, Message)> {
+    let mut hits: Vec<_> = app
+        .accounts
+        .iter()
+        .flat_map(|account| {
+            account
+                .quick_hits
+                .iter()
+                .filter(|message| {
+                    account
+                        .chats
+                        .iter()
+                        .find(|chat| chat.id == message.chat)
+                        .is_none_or(|chat| !chat.locked)
+                })
+                .map(|message| (account.id.clone(), message.clone()))
+        })
+        .collect();
+    hits.sort_by_key(|(_, message)| std::cmp::Reverse(message.timestamp));
+    hits.truncate(MESSAGE_LIMIT);
+    hits
+}
+
 fn launcher(app: &mut App, ui: &mut egui::Ui) {
     if app.quickchat.compose.is_some() {
         compose(app, ui);
@@ -298,13 +335,44 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
     }
     let ctx = ui.ctx().clone();
     let palette = app.palette;
+    // Messages are searched as the name is typed, once per change.
+    let wanted = app.quickchat.query.trim();
+    let wanted = if wanted.chars().count() >= MESSAGE_SEARCH_MIN {
+        wanted.to_owned()
+    } else {
+        String::new()
+    };
+    if wanted != app.quickchat.searched {
+        app.quickchat.searched = wanted.clone();
+        app.actions.push(Action::QuickSearchMessages(wanted));
+    }
+    let rows = |app: &App| -> Vec<Row> {
+        let mut rows: Vec<Row> = quickchat::search(&app.accounts, &app.quickchat.query, LIMIT)
+            .into_iter()
+            .map(Row::Name)
+            .collect();
+        if !app.quickchat.query.trim().is_empty() {
+            rows.extend(
+                message_hits(app)
+                    .into_iter()
+                    .map(|(account, message)| Row::Message(account, Box::new(message))),
+            );
+        }
+        rows
+    };
     // Tab writes to the selected chat. With nothing to write to it is left
     // to move the focus, so All Chats stays reachable from the keyboard.
     let writable = {
-        let hits = quickchat::search(&app.accounts, &app.quickchat.query, LIMIT);
-        hits.get(app.quickchat.selected.min(hits.len().saturating_sub(1)))
-            .filter(|hit| can_write(app, hit))
-            .cloned()
+        let rows = rows(app);
+        match rows.get(app.quickchat.selected.min(rows.len().saturating_sub(1))) {
+            Some(Row::Name(hit)) if can_write(app, hit) => Some(hit.clone()),
+            _ => None,
+        }
+    };
+    let hints = if writable.is_some() {
+        "↑↓ Select    ↵ Open    ⇥ Write    esc Close"
+    } else {
+        "↑↓ Select    ↵ Open    esc Close"
     };
     if let Some(hit) = writable
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
@@ -341,10 +409,14 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
             if response.changed() {
                 app.quickchat.selected = 0;
             }
-            let hits = quickchat::search(&app.accounts, &app.quickchat.query, LIMIT);
-            let moved = !hits.is_empty() && (up || down);
-            if !hits.is_empty() {
-                let last = hits.len() - 1;
+            let rows = rows(app);
+            let names = rows
+                .iter()
+                .filter(|row| matches!(row, Row::Name(_)))
+                .count();
+            let moved = !rows.is_empty() && (up || down);
+            if !rows.is_empty() {
+                let last = rows.len() - 1;
                 let at = app.quickchat.selected.min(last);
                 app.quickchat.selected = match (up, down) {
                     (true, false) if at == 0 => last,
@@ -354,7 +426,7 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
                     _ => at,
                 };
                 if enter {
-                    chosen = hits.get(app.quickchat.selected).cloned();
+                    chosen = rows.get(app.quickchat.selected).cloned();
                 }
             }
             let footer_height = 34.0;
@@ -366,34 +438,49 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
                     .max_rect(list)
                     .layout(Layout::top_down(Align::Min)),
             );
-            if hits.is_empty() {
+            if rows.is_empty() {
                 empty(app, &mut child);
             } else {
-                let heading = if app.quickchat.query.trim().is_empty() {
-                    "Recent"
-                } else {
-                    "Results"
-                };
-                egui::Frame::new()
-                    .inner_margin(egui::Margin {
-                        left: 20,
-                        right: 20,
-                        top: 4,
-                        bottom: 6,
+                let hits: Vec<Hit> = rows
+                    .iter()
+                    .filter_map(|row| match row {
+                        Row::Name(hit) => Some(hit.clone()),
+                        Row::Message(..) => None,
                     })
-                    .show(&mut child, |ui| {
-                        theme::text(ui, heading, theme::semibold(12.0), palette.secondary);
-                    });
+                    .collect();
+                let query = app.quickchat.query.trim().to_owned();
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(&mut child, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        for (index, hit) in hits.iter().enumerate() {
+                        for (index, row) in rows.iter().enumerate() {
+                            if index == 0 && names > 0 {
+                                heading(
+                                    app,
+                                    ui,
+                                    if query.is_empty() {
+                                        "Recent"
+                                    } else {
+                                        "Results"
+                                    },
+                                );
+                            }
+                            if index == names {
+                                heading(app, ui, "Messages");
+                            }
                             let selected = index == app.quickchat.selected;
-                            let detail = detail(app, hit, &hits);
                             let top = ui.cursor().top();
-                            if hit_row(app, ui, hit, &detail, selected) {
-                                chosen = Some(hit.clone());
+                            let clicked = match row {
+                                Row::Name(hit) => {
+                                    let detail = detail(app, hit, &hits);
+                                    hit_row(app, ui, hit, &detail, selected)
+                                }
+                                Row::Message(account, message) => {
+                                    message_row(app, ui, account, message, &query, selected)
+                                }
+                            };
+                            if clicked {
+                                chosen = Some(row.clone());
                             }
                             if selected && moved {
                                 let rect = Rect::from_min_size(
@@ -405,11 +492,124 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
                         }
                     });
             }
-            footer(app, ui, "↑↓ Select    ↵ Open    ⇥ Write    esc Close");
+            footer(app, ui, hints);
         });
-    if let Some(hit) = chosen {
-        choose(app, hit);
+    match chosen {
+        Some(Row::Name(hit)) => choose(app, hit),
+        Some(Row::Message(account, message)) => open_message(app, account, *message),
+        None => {}
     }
+}
+
+/// A quiet label over a group of rows.
+fn heading(app: &App, ui: &mut egui::Ui, label: &str) {
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 20,
+            right: 20,
+            top: 8,
+            bottom: 6,
+        })
+        .show(ui, |ui| {
+            theme::text(ui, label, theme::semibold(12.0), app.palette.secondary);
+        });
+}
+
+/// Opens the panel at a message the search found, in its own account.
+fn open_message(app: &mut App, account: AccountId, message: Message) {
+    app.quickchat.panel();
+    app.actions.push(Action::SwitchAccount(account));
+    app.page = Page::Chats;
+    app.actions.push(Action::OpenMessage {
+        chat: message.chat,
+        message: message.id,
+    });
+}
+
+/// A message the search found: the chat's picture and name, then the line
+/// that matched, with its sender in a group.
+fn message_row(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    account: &AccountId,
+    message: &Message,
+    query: &str,
+    selected: bool,
+) -> bool {
+    let palette = app.palette;
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), HIT_HEIGHT), Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return response.clicked();
+    }
+    if selected {
+        widgets::row_highlight(ui, &palette, rect, palette.surface_active);
+    } else if response.hovered() {
+        widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
+    }
+    let Some(owner) = app.accounts.iter_mut().find(|owner| &owner.id == account) else {
+        return false;
+    };
+    let title = quickchat::chat_name(owner, &message.chat);
+    let picture = owner.avatar(&message.chat);
+    let sender = if message.from_me {
+        Some("You".to_owned())
+    } else if crate::model::ChatKind::from_id(&message.chat) == crate::model::ChatKind::Group {
+        Some(
+            owner
+                .contacts
+                .get(&message.sender)
+                .and_then(Contact::display_name)
+                .map(str::to_owned)
+                .or_else(|| message.sender_name.clone())
+                .unwrap_or_else(|| quickchat::chat_name(owner, &message.sender)),
+        )
+    } else {
+        None
+    };
+    let avatar = Rect::from_center_size(
+        pos2(rect.left() + 20.0 + AVATAR / 2.0, rect.center().y),
+        Vec2::splat(AVATAR),
+    );
+    widgets::paint_avatar(
+        ui,
+        &palette,
+        avatar,
+        &title,
+        &message.chat,
+        picture.as_deref(),
+    );
+    let left = avatar.right() + 12.0;
+    let right = rect.right() - 20.0;
+    let stamp = ui.painter().layout_no_wrap(
+        crate::util::chat_stamp(app.locale, message.timestamp),
+        theme::regular(11.5),
+        palette.dim,
+    );
+    let width = (right - stamp.size().x - 8.0 - left).max(0.0);
+    let name = widgets::line(ui, &title, theme::medium(14.5), palette.text, width, 1);
+    let text = message
+        .text_matching(query)
+        .unwrap_or_else(|| message.summary());
+    let text = crate::markup::plain(&text, &[]);
+    let text = match sender {
+        Some(sender) => format!("{sender}: {text}"),
+        None => text,
+    };
+    let quiet = widgets::line(
+        ui,
+        &text,
+        theme::regular(12.5),
+        palette.secondary,
+        (right - left).max(0.0),
+        1,
+    );
+    let top = rect.center().y - (name.size().y + 2.0 + quiet.size().y) / 2.0;
+    name.paint(ui, pos2(left, top), palette.text);
+    ui.painter()
+        .galley(pos2(right - stamp.size().x, top + 1.0), stamp, palette.dim);
+    quiet.paint(ui, pos2(left, top + name.size().y + 2.0), palette.secondary);
+    response.clicked()
 }
 
 /// Writing to one chat from the launcher: Enter sends and closes, Shift+Enter
@@ -698,6 +898,38 @@ mod tests {
         run(&ctx, |ui| panel_keys(&mut app, ui.ctx()));
         assert!(app.actions.contains(&Action::CancelReply));
         assert!(!app.actions.contains(&Action::CloseWindow));
+    }
+
+    /// Typing two characters asks for matching messages; fewer clears them.
+    #[test]
+    fn the_launcher_searches_messages_from_two_characters() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app(root.path());
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        app.quickchat.search_with_query("a");
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| launcher(&mut app, ui));
+        output.textures_delta.clear();
+        assert!(
+            !app.actions
+                .iter()
+                .any(|action| matches!(action, Action::QuickSearchMessages(_)))
+        );
+        app.quickchat.query = " ad ".into();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| launcher(&mut app, ui));
+        output.textures_delta.clear();
+        assert!(
+            app.actions
+                .contains(&Action::QuickSearchMessages("ad".into()))
+        );
+        app.actions.clear();
+        app.quickchat.query = "a".into();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| launcher(&mut app, ui));
+        output.textures_delta.clear();
+        assert!(
+            app.actions
+                .contains(&Action::QuickSearchMessages(String::new()))
+        );
     }
 
     /// The first Escape clears a typed name, the second closes the window.
