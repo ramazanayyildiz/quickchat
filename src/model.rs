@@ -2227,6 +2227,13 @@ pub enum Action {
     Open(Page),
     /// Leave Quick Search/one-chat mode and show the full conversation list.
     ShowAllChats,
+    /// Sends text from QuickChat's launcher without opening the chat: the
+    /// chat's draft, and an edit under way in the open chat, stay as they are.
+    QuickSend {
+        account: AccountId,
+        chat: ChatId,
+        text: String,
+    },
     /// Opens settings, or closes them when they are already showing.
     ToggleSettings,
     /// Steps back to the previously visited page, chat, or dialog, as a

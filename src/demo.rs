@@ -3004,6 +3004,15 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.enable_quickchat_fork();
                 app.quickchat.search();
             }
+            "quick-compose" => {
+                // QuickChat's launcher writing to the sample's first chat.
+                app.enable_quickchat_fork();
+                app.quickchat.search();
+                if let Some(hit) = crate::quickchat::search(&app.accounts, "", 1).pop() {
+                    app.quickchat.compose(hit);
+                    app.quickchat.message = "Running five minutes late, start without me".into();
+                }
+            }
             "quick-panel" => {
                 // QuickChat's one-chat panel over the sample's first chat.
                 app.enable_quickchat_fork();
@@ -5876,7 +5885,12 @@ mod tests {
     /// sizes their windows open at and the full window's.
     #[test]
     fn quickchat_surfaces_lay_out() {
-        for page in ["quick-search", "quick-search,light", "quick-panel"] {
+        for page in [
+            "quick-search",
+            "quick-search,light",
+            "quick-compose",
+            "quick-panel",
+        ] {
             let mut app = app();
             let ctx = egui::Context::default();
             app.attach(&ctx);
@@ -5884,6 +5898,68 @@ mod tests {
             render(&mut app, &ctx);
             assert!(app.quickchat_compact(), "{page}");
         }
+    }
+
+    /// Tab writes to the selected chat, Escape goes back with the text kept,
+    /// and Enter sends it to that chat and closes the launcher.
+    #[test]
+    fn quickchat_tab_writes_to_the_selected_chat() {
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        apply_flags(&mut app, Some("quick-search"));
+        render(&mut app, &ctx);
+        let target = crate::quickchat::search(&app.accounts, "", 1)
+            .pop()
+            .unwrap();
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        assert_eq!(app.quickchat.compose.as_ref(), Some(&target));
+        render(&mut app, &ctx);
+        frame_with(&mut app, &ctx, vec![egui::Event::Text("See you".into())]);
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Enter, egui::Modifiers::SHIFT)],
+        );
+        assert!(app.quickchat.message.starts_with("See you"));
+        assert!(
+            app.quickchat.message.contains('\n'),
+            "Shift+Enter is a new line"
+        );
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(app.quickchat.compose.is_none());
+        assert!(
+            app.quickchat.message.starts_with("See you"),
+            "the text is kept"
+        );
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        render(&mut app, &ctx);
+        frame_with(
+            &mut app,
+            &ctx,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        );
+        assert!(app.hide_intent, "sending closes the launcher");
+        assert!(app.quickchat.message.is_empty());
     }
 
     #[test]

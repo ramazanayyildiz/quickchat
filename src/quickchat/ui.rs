@@ -14,6 +14,7 @@ const SEARCH_SIZE: [f32; 2] = [640.0, 440.0];
 /// traffic lights and offers Back, which returns to the search.
 const PANEL_SIZE: [f32; 2] = [500.0, 760.0];
 const SEARCH_FIELD: &str = "quickchat-name-search";
+const MESSAGE_FIELD: &str = "quickchat-message";
 const HIT_HEIGHT: f32 = 56.0;
 const AVATAR: f32 = 36.0;
 const LIMIT: usize = 30;
@@ -35,22 +36,34 @@ fn place_window(app: &mut App, ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
         egui::WindowLevel::AlwaysOnTop,
     ));
-    // This is a first-pass placement on the primary display. A real NSPanel
-    // geometry pilot will handle multiple monitors, Spaces and menu-bar insets.
-    if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
+    if let Some(area) = screen_area(ctx) {
         let left = if panel {
-            (monitor.x - width - 22.0).max(0.0)
+            area.right() - width - 22.0
         } else {
-            ((monitor.x - width) / 2.0).max(0.0)
+            area.center().x - width / 2.0
         };
         let top = if panel {
-            42.0
+            area.top() + 12.0
         } else {
-            ((monitor.y - height) / 4.0).max(30.0)
+            area.top() + ((area.height() - height) / 4.0).max(30.0)
         };
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos2(left, top)));
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos2(
+            left.max(area.left()),
+            top,
+        )));
     }
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+}
+
+/// Where the window may go: the screen the pointer is on, on macOS, so the
+/// launcher follows the person across displays; elsewhere the window's own.
+fn screen_area(ctx: &egui::Context) -> Option<Rect> {
+    #[cfg(all(target_os = "macos", feature = "quickchat"))]
+    if let Some(area) = super::screen::under_pointer() {
+        return Some(area);
+    }
+    ctx.input(|i| i.viewport().monitor_size)
+        .map(|size| Rect::from_min_size(egui::Pos2::ZERO, size))
 }
 
 fn choose(app: &mut App, hit: Hit) {
@@ -67,6 +80,19 @@ fn choose(app: &mut App, hit: Hit) {
         });
     }
     app.focus_composer = true;
+}
+
+/// Whether the launcher can send to `hit` without opening it: only an
+/// existing chat that takes messages from us. A contact without a chat,
+/// or an admins-only group, opens as before.
+fn can_write(app: &App, hit: &Hit) -> bool {
+    hit.existing
+        && app
+            .accounts
+            .iter()
+            .find(|account| account.id == hit.account)
+            .and_then(|account| account.chats.iter().find(|chat| chat.id == hit.chat))
+            .is_some_and(crate::model::Chat::can_send)
 }
 
 /// The last digits of a number, to tell apart two people with one name.
@@ -233,7 +259,7 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Hit, detail: &str, selected: 
 
 /// Keyboard hints along the bottom, and the shortcut's state only when it
 /// failed.
-fn footer(app: &App, ui: &mut egui::Ui) {
+fn footer(app: &App, ui: &mut egui::Ui, hints: &str) {
     let palette = app.palette;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
     ui.painter().hline(
@@ -241,7 +267,6 @@ fn footer(app: &App, ui: &mut egui::Ui) {
         rect.top(),
         egui::Stroke::new(1.0, palette.outline),
     );
-    let hints = "↑↓ Select    ↵ Open    esc Close";
     let galley = ui
         .painter()
         .layout_no_wrap(hints.to_owned(), theme::regular(12.0), palette.dim);
@@ -267,8 +292,26 @@ fn footer(app: &App, ui: &mut egui::Ui) {
 }
 
 fn launcher(app: &mut App, ui: &mut egui::Ui) {
+    if app.quickchat.compose.is_some() {
+        compose(app, ui);
+        return;
+    }
     let ctx = ui.ctx().clone();
     let palette = app.palette;
+    // Tab writes to the selected chat. With nothing to write to it is left
+    // to move the focus, so All Chats stays reachable from the keyboard.
+    let writable = {
+        let hits = quickchat::search(&app.accounts, &app.quickchat.query, LIMIT);
+        hits.get(app.quickchat.selected.min(hits.len().saturating_sub(1)))
+            .filter(|hit| can_write(app, hit))
+            .cloned()
+    };
+    if let Some(hit) = writable
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    {
+        app.quickchat.compose(hit);
+        return;
+    }
     let (up, down, enter, escape) = ctx.input_mut(|i| {
         (
             i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
@@ -362,11 +405,152 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
                         }
                     });
             }
-            footer(app, ui);
+            footer(app, ui, "↑↓ Select    ↵ Open    ⇥ Write    esc Close");
         });
     if let Some(hit) = chosen {
         choose(app, hit);
     }
+}
+
+/// Writing to one chat from the launcher: Enter sends and closes, Shift+Enter
+/// starts a new line, Escape goes back to the list with the text kept.
+fn compose(app: &mut App, ui: &mut egui::Ui) {
+    let Some(hit) = app.quickchat.compose.clone() else {
+        return;
+    };
+    let ctx = ui.ctx().clone();
+    let palette = app.palette;
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        app.quickchat.stop_composing();
+        return;
+    }
+    let field = egui::Id::new(MESSAGE_FIELD);
+    // `consume_key(NONE, Enter)` also matches Shift+Enter, which must reach
+    // the field as a new line: look at the events' modifiers instead.
+    let send = ctx.memory(|memory| memory.has_focus(field))
+        && ctx.input_mut(|input| {
+            let mut sent = false;
+            input.events.retain(|event| {
+                let is_send = !sent
+                    && matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Enter,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } if !modifiers.shift && !modifiers.alt
+                    );
+                sent |= is_send;
+                !is_send
+            });
+            sent
+        });
+    if send && !app.quickchat.message.trim().is_empty() {
+        app.actions.push(Action::QuickSend {
+            account: hit.account.clone(),
+            chat: hit.chat.clone(),
+            text: std::mem::take(&mut app.quickchat.message),
+        });
+        close(app);
+        return;
+    }
+    let mut back = false;
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(palette.window))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            back = compose_bar(app, ui, &hit);
+            let footer_height = 34.0;
+            let body_height = (ui.available_height() - footer_height).max(0.0);
+            let (body, _) =
+                ui.allocate_exact_size(vec2(ui.available_width(), body_height), Sense::hover());
+            let inner = body.shrink2(vec2(20.0, 12.0));
+            let mut child = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(inner)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(&mut child, |ui| {
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut app.quickchat.message)
+                            .id(field)
+                            .font(theme::regular(15.0))
+                            .text_color(palette.text)
+                            .hint_text(format!("Message {}", hit.name))
+                            .frame(egui::Frame::NONE)
+                            .desired_width(inner.width())
+                            .desired_rows(8),
+                    );
+                    if std::mem::take(&mut app.quickchat.focus_message) {
+                        response.request_focus();
+                    }
+                });
+            footer(app, ui, "↵ Send    ⇧↵ New line    esc Back");
+        });
+    if back {
+        app.quickchat.stop_composing();
+    }
+}
+
+/// The message view's top bar: Back, then whom the message goes to, as
+/// large as the name in the list so the recipient is never in doubt.
+fn compose_bar(app: &mut App, ui: &mut egui::Ui, hit: &Hit) -> bool {
+    let palette = app.palette;
+    let (bar, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), theme::TOP_BAR_HEIGHT),
+        Sense::hover(),
+    );
+    crate::ui::titlebar_drag(ui, bar);
+    ui.painter().hline(
+        bar.x_range(),
+        bar.bottom(),
+        egui::Stroke::new(1.0, palette.outline),
+    );
+    let left = bar.left() + theme::traffic_light_inset(ui.ctx()).max(16.0);
+    let button = Rect::from_center_size(pos2(left + 16.0, bar.center().y), Vec2::splat(32.0));
+    let mut child = ui.new_child(
+        UiBuilder::new()
+            .max_rect(button)
+            .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+    );
+    let back = theme::icon_button(
+        &mut child,
+        Icon::ArrowLeft,
+        18.0,
+        palette.secondary,
+        palette.text,
+        "Back to the list",
+    )
+    .clicked();
+    let avatar = Rect::from_center_size(
+        pos2(button.right() + 8.0 + 16.0, bar.center().y),
+        Vec2::splat(32.0),
+    );
+    let picture = app
+        .accounts
+        .iter_mut()
+        .find(|account| account.id == hit.account)
+        .and_then(|account| account.avatar(&hit.chat));
+    widgets::paint_avatar(
+        ui,
+        &palette,
+        avatar,
+        &hit.name,
+        &hit.chat,
+        picture.as_deref(),
+    );
+    let text_left = avatar.right() + 10.0;
+    let width = (bar.right() - 20.0 - text_left).max(0.0);
+    let name = widgets::line(ui, &hit.name, theme::semibold(15.0), palette.text, width, 1);
+    name.paint(
+        ui,
+        pos2(text_left, bar.center().y - name.size().y / 2.0),
+        palette.text,
+    );
+    back
 }
 
 /// What the list shows with nothing to list.

@@ -5405,6 +5405,23 @@ impl App {
     }
 
     /// Dispatches composed text with its explicit quote target and restores it on refusal.
+    /// Sends `text` to a chat that need not be open, as QuickChat's launcher
+    /// does, leaving the composer, drafts and any edit under way alone.
+    fn quick_send(&mut self, chat: ChatId, text: String) {
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            return;
+        }
+        let (text, mentions) = self.encode_composer_mentions(&chat, text);
+        self.backend.send(Command::SendText {
+            chat,
+            text,
+            quoting: None,
+            mentions,
+        });
+        self.follow_sent_chat();
+    }
+
     fn send_text(
         &mut self,
         chat: ChatId,
@@ -8290,6 +8307,16 @@ impl App {
             Action::Quit => {
                 self.quit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Action::QuickSend {
+                account,
+                chat,
+                text,
+            } => {
+                self.switch_account(&account);
+                if self.account().id == account && self.chat(&chat).is_some_and(Chat::can_send) {
+                    self.quick_send(chat, text);
+                }
             }
             Action::ShowAllChats => {
                 let was_compact = self.quickchat.mode != crate::quickchat::Mode::Normal;
@@ -11731,6 +11758,86 @@ mod tests {
         assert_eq!(app.account().id.as_str(), "2");
         assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Panel);
         assert_eq!(app.open_chat.as_deref(), Some(chat));
+    }
+
+    /// The launcher sends to the chat it names, in that chat's account.
+    #[test]
+    fn quick_send_reaches_the_named_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, mut commands) = two_accounts(directory.path());
+        let chat = "15550003333@s.whatsapp.net";
+        app.enable_quickchat_fork();
+        app.accounts[1].chats = vec![Chat::new(chat.into(), "Ada".into())];
+        app.apply(
+            Action::QuickSend {
+                account: AccountId::parse("2").unwrap(),
+                chat: chat.into(),
+                text: "  On my way  ".into(),
+            },
+            &egui::Context::default(),
+        );
+        assert_eq!(app.account().id.as_str(), "2");
+        assert!(
+            std::iter::from_fn(|| commands.try_recv().ok()).any(|command| matches!(command,
+            Command::SendText { chat: to, text, quoting: None, .. }
+                if to == chat && text == "On my way"))
+        );
+    }
+
+    /// Sending from the launcher leaves the open chat's composer, its draft
+    /// and an edit under way there as they were.
+    #[test]
+    fn quick_send_leaves_the_open_chats_composer_alone() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::headless(AppDirs::under(directory.path()), Settings::default()).0;
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        let chat = "15550003333@s.whatsapp.net";
+        app.chats = vec![Chat::new(chat.into(), "Ada".into())];
+        app.open_chat = Some(chat.into());
+        app.composer = "half written".into();
+        app.editing = Some("being-edited".into());
+        let account = app.account().id.clone();
+        app.apply(
+            Action::QuickSend {
+                account,
+                chat: chat.into(),
+                text: "On my way".into(),
+            },
+            &egui::Context::default(),
+        );
+        let sent: Vec<_> = std::iter::from_fn(|| commands.try_recv().ok()).collect();
+        assert!(sent.iter().any(|command| matches!(command,
+            Command::SendText { text, .. } if text == "On my way")));
+        assert!(!sent.iter().any(|command| matches!(
+            command,
+            Command::EditText { .. } | Command::SaveDraft { .. }
+        )));
+        assert_eq!(app.composer, "half written");
+        assert_eq!(app.editing.as_deref(), Some("being-edited"));
+    }
+
+    /// A chat that does not take our messages gets nothing.
+    #[test]
+    fn quick_send_skips_a_chat_that_cannot_take_messages() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, mut commands) = two_accounts(directory.path());
+        let chat = "15550003333@s.whatsapp.net";
+        let mut read_only = Chat::new(chat.into(), "Announcements".into());
+        read_only.read_only = true;
+        app.accounts[1].chats = vec![read_only];
+        app.apply(
+            Action::QuickSend {
+                account: AccountId::parse("2").unwrap(),
+                chat: chat.into(),
+                text: "Hello".into(),
+            },
+            &egui::Context::default(),
+        );
+        assert!(
+            !std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|command| matches!(command, Command::SendText { .. }))
+        );
     }
 
     #[test]
@@ -21250,6 +21357,30 @@ mod app_lock_tests {
         try_password(&mut app, &ctx, PASSWORD);
         assert_eq!(app.quickchat.mode, crate::quickchat::Mode::Panel);
         assert_eq!(app.open_chat.as_deref(), Some(CHAT));
+    }
+
+    /// The app lock holds QuickChat's quick send back like any other send.
+    #[test]
+    fn quick_send_is_dropped_while_the_app_is_locked() {
+        let ctx = egui::Context::default();
+        let mut app = app_with(settings(Some(PASSWORD)));
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        app.enable_quickchat_fork();
+        app.chats = vec![Chat::new(CHAT.into(), "Ada Lovelace".into())];
+        let account = app.account().id.clone();
+        app.apply(
+            Action::QuickSend {
+                account,
+                chat: CHAT.into(),
+                text: "Hello".into(),
+            },
+            &ctx,
+        );
+        assert!(
+            !std::iter::from_fn(|| commands.try_recv().ok())
+                .any(|command| matches!(command, Command::SendText { .. }))
+        );
     }
 
     /// Without a password there is nothing to wait for: the link opens.

@@ -8,6 +8,8 @@ pub(crate) mod dock;
 mod hooks;
 #[cfg(all(target_os = "macos", feature = "quickchat"))]
 pub mod hotkey;
+#[cfg(all(target_os = "macos", feature = "quickchat"))]
+mod screen;
 pub mod ui;
 
 pub(crate) use hooks::tray_config;
@@ -47,6 +49,15 @@ pub struct State {
     pub selected: usize,
     pub focus_search: bool,
     pub resize_pending: bool,
+    /// The chat a message is being written to from the launcher, which
+    /// then shows a message field instead of the list.
+    pub compose: Option<Hit>,
+    /// The message being written there. It survives going back to the list,
+    /// so a stray Escape does not lose it, until another chat is picked.
+    pub message: String,
+    pub focus_message: bool,
+    /// Whose text `message` is.
+    last_compose: Option<(AccountId, String)>,
 }
 
 impl Default for State {
@@ -57,6 +68,10 @@ impl Default for State {
             selected: 0,
             focus_search: false,
             resize_pending: false,
+            compose: None,
+            message: String::new(),
+            focus_message: false,
+            last_compose: None,
         }
     }
 }
@@ -74,6 +89,30 @@ impl State {
         self.selected = 0;
         self.focus_search = true;
         self.resize_pending = true;
+        self.compose = None;
+    }
+
+    /// Writes to `hit` from the launcher. Another chat's unsent text is
+    /// dropped rather than sent to the wrong person.
+    pub fn compose(&mut self, hit: Hit) {
+        if self.compose_target() != Some((&hit.account, hit.chat.as_str())) {
+            self.message.clear();
+        }
+        self.last_compose = Some((hit.account.clone(), hit.chat.clone()));
+        self.compose = Some(hit);
+        self.focus_message = true;
+    }
+
+    /// Back from the message field to the list, keeping the text.
+    pub fn stop_composing(&mut self) {
+        self.compose = None;
+        self.focus_search = true;
+    }
+
+    fn compose_target(&self) -> Option<(&AccountId, &str)> {
+        self.last_compose
+            .as_ref()
+            .map(|(account, chat)| (account, chat.as_str()))
     }
 
     pub fn panel(&mut self) {
@@ -87,6 +126,10 @@ impl State {
         self.selected = 0;
         self.focus_search = false;
         self.resize_pending = false;
+        self.compose = None;
+        self.message.clear();
+        self.last_compose = None;
+        self.focus_message = false;
     }
 }
 

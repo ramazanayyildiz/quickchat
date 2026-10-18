@@ -32,6 +32,16 @@ Current pilot includes:
 - With an empty field the launcher lists recent chats; arrow keys wrap
   around the list and Enter opens the selected conversation in a narrow
   panel at the right of the screen.
+- **Tab writes to the selected chat without opening it.** The launcher shows
+  the recipient's name and picture over a message field: Enter sends and
+  closes, Shift+Enter starts a new line, Escape goes back to the list and
+  keeps the text (picking another chat drops it, so it never goes to the
+  wrong person). Only existing chats that take your messages offer this; a
+  contact without a chat, or an admins-only group, opens in the panel as
+  before. The app lock blocks it like any other send, and the open chat's
+  draft or an edit under way there is left alone.
+- The launcher and the panel open on the screen the pointer is on, inside
+  the area the menu bar and the Dock leave free.
 - In the launcher, Escape clears a typed name first and closes on the next
   press. In the panel it cancels whatever is in progress (a reply, a
   dialog, a selection) and otherwise hides the panel; the chat header's
@@ -230,8 +240,9 @@ our automated tests.
 
 ## Verified checks and remaining acceptance work
 
-- Live macOS window focus, screen selection, panel sizing and native shortcut
-  still require an interactive desktop run.
+- Live macOS window focus, screen selection (including displays with
+  different scaling), panel sizing and native shortcut still require an
+  interactive desktop run.
 - Live WhatsApp account linking and notification click have not been exercised.
 - On this Mac, `cargo test --locked --all-targets --all-features`
   passed with 1227 passing tests, zero failures and 8 explicitly ignored.
@@ -242,7 +253,9 @@ our automated tests.
 - Raycast accepts an optional name and prefills native search; it does not
   show a contact-result list within Raycast or read chat messages.
 - No MCP server, AI history search, background summaries or sending API yet.
-- A complete signed/notarized release, multi-monitor behavior and telemetry-free
+  Sending exists only in the launcher's own window, never over the local
+  command channel.
+- A complete signed/notarized release and telemetry-free
   performance benchmarks remain future gates.
 
 The current source is a pilot and must **not** be considered release-ready
