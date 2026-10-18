@@ -328,6 +328,24 @@ fn message_hits(app: &App) -> Vec<(AccountId, Message)> {
     hits
 }
 
+/// What the launcher lists: names, then the messages the last search found.
+fn rows(app: &App) -> Vec<Row> {
+    let mut rows: Vec<Row> = quickchat::search(&app.accounts, &app.quickchat.query, LIMIT)
+        .into_iter()
+        .map(Row::Name)
+        .collect();
+    // Only the answer to what was asked: hits from an earlier search stay
+    // out of a shorter one that asked for none.
+    if !app.quickchat.searched.is_empty() {
+        rows.extend(
+            message_hits(app)
+                .into_iter()
+                .map(|(account, message)| Row::Message(account, Box::new(message))),
+        );
+    }
+    rows
+}
+
 fn launcher(app: &mut App, ui: &mut egui::Ui) {
     if app.quickchat.compose.is_some() {
         compose(app, ui);
@@ -346,20 +364,6 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
         app.quickchat.searched = wanted.clone();
         app.actions.push(Action::QuickSearchMessages(wanted));
     }
-    let rows = |app: &App| -> Vec<Row> {
-        let mut rows: Vec<Row> = quickchat::search(&app.accounts, &app.quickchat.query, LIMIT)
-            .into_iter()
-            .map(Row::Name)
-            .collect();
-        if !app.quickchat.query.trim().is_empty() {
-            rows.extend(
-                message_hits(app)
-                    .into_iter()
-                    .map(|(account, message)| Row::Message(account, Box::new(message))),
-            );
-        }
-        rows
-    };
     // Tab writes to the selected chat. With nothing to write to it is left
     // to move the focus, so All Chats stays reachable from the keyboard.
     let writable = {
@@ -374,8 +378,28 @@ fn launcher(app: &mut App, ui: &mut egui::Ui) {
     } else {
         "↑↓ Select    ↵ Open    esc Close"
     };
+    // `consume_key(NONE, Tab)` would take Shift+Tab too, which moves the
+    // focus back: look at the event's modifiers instead.
+    let tab = |input: &mut egui::InputState| {
+        let mut taken = false;
+        input.events.retain(|event| {
+            let plain_tab = !taken
+                && matches!(
+                    event,
+                    egui::Event::Key {
+                        key: egui::Key::Tab,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if modifiers.is_none()
+                );
+            taken |= plain_tab;
+            !plain_tab
+        });
+        taken
+    };
     if let Some(hit) = writable
-        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        && ctx.input_mut(tab)
     {
         app.quickchat.compose(hit);
         return;
@@ -930,6 +954,47 @@ mod tests {
             app.actions
                 .contains(&Action::QuickSearchMessages(String::new()))
         );
+    }
+
+    fn message(chat: &str, id: &str, text: &str) -> crate::model::Message {
+        crate::model::Message {
+            id: id.into(),
+            chat: chat.into(),
+            sender: chat.into(),
+            sender_name: None,
+            from_me: false,
+            timestamp: 1,
+            content: crate::model::Content::text(text),
+            status: crate::model::Delivery::None,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            history_order: None,
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        }
+    }
+
+    /// Hits an earlier search left behind never show under a query too
+    /// short to search, as after closing the launcher and typing one letter.
+    #[test]
+    fn earlier_message_hits_stay_out_of_a_short_query() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app(root.path());
+        app.quick_hits = vec![message("15550001111@s.whatsapp.net", "hit", "meet up")];
+        app.quickchat.search_with_query("meet");
+        app.quickchat.searched = "meet".into();
+        assert!(rows(&app).iter().any(|row| matches!(row, Row::Message(..))));
+        app.quickchat.hide();
+        app.quickchat.search_with_query("m");
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| launcher(&mut app, ui));
+        output.textures_delta.clear();
+        assert!(!rows(&app).iter().any(|row| matches!(row, Row::Message(..))));
     }
 
     /// The first Escape clears a typed name, the second closes the window.

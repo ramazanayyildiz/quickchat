@@ -11845,6 +11845,32 @@ mod tests {
         assert!(commands.try_recv().is_err());
     }
 
+    /// The archive's answer reaches the launcher only for what it last asked.
+    #[test]
+    fn message_hits_reach_the_launcher_only_for_its_search() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut app, _) = App::headless(AppDirs::under(root.path()), Settings::default());
+        let (backend, _commands, events) = Backend::recording_with_events();
+        app.backend = backend;
+        app.enable_quickchat_fork();
+        app.quickchat.searched = "dinner".into();
+        let hit = message("15550003333@s.whatsapp.net", "hit", 1);
+        for query in ["lunch", "dinner"] {
+            events
+                .send(Event::SearchHits {
+                    query: query.into(),
+                    messages: vec![hit.clone()],
+                })
+                .unwrap();
+        }
+        app.handle_events();
+        assert_eq!(app.quick_hits, vec![hit]);
+        assert!(
+            app.search_hits.is_empty(),
+            "the chat list asked for nothing"
+        );
+    }
+
     /// A new shortcut is saved, and Off is a choice like any other.
     #[test]
     fn the_quick_search_shortcut_is_saved() {

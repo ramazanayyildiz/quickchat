@@ -37,6 +37,20 @@ pub(crate) fn tray_config(lockable: bool, shortcut: QuickShortcut) -> fastframe_
     config
 }
 
+/// Whether an account has linked, and so has chats and an archive to search.
+fn account_ready(account: &crate::account::Account) -> bool {
+    match account.link {
+        LinkStatus::Connected => true,
+        LinkStatus::Connecting | LinkStatus::Disconnected { .. } => {
+            account.me.is_some() || !account.chats.is_empty()
+        }
+        LinkStatus::Starting
+        | LinkStatus::Unlinked { .. }
+        | LinkStatus::LoggedOut
+        | LinkStatus::Failed(_) => false,
+    }
+}
+
 impl App {
     /// Turns on QuickChat's launcher and turns off ZapFast's updater.
     pub fn enable_quickchat_fork(&mut self) {
@@ -73,7 +87,8 @@ impl App {
         self.quickchat.searched = query.clone();
         for account in &mut self.accounts {
             account.quick_hits.clear();
-            if !query.is_empty() {
+            // An account not linked yet has no archive open to ask.
+            if !query.is_empty() && account_ready(account) {
                 account
                     .backend
                     .send(crate::backend::Command::SearchMessages {
@@ -170,16 +185,7 @@ impl App {
     /// Previous linked accounts with cached identity/chats can be searched
     /// while reconnecting or temporarily offline.
     pub fn quickchat_ready(&self) -> bool {
-        self.accounts.iter().any(|account| match account.link {
-            LinkStatus::Connected => true,
-            LinkStatus::Connecting | LinkStatus::Disconnected { .. } => {
-                account.me.is_some() || !account.chats.is_empty()
-            }
-            LinkStatus::Starting
-            | LinkStatus::Unlinked { .. }
-            | LinkStatus::LoggedOut
-            | LinkStatus::Failed(_) => false,
-        })
+        self.accounts.iter().any(account_ready)
     }
 
     /// First-run and unlinked accounts stay on the full pairing page until
