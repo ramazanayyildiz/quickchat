@@ -756,8 +756,45 @@ pub fn tray_template_rgba(size: usize) -> Vec<u8> {
     rgba
 }
 
+/// The tray template with a dot at its top right, cut free of the mark by
+/// a clear ring: QuickChat's sign of unread chats in the menu bar, where it
+/// has no Dock badge.
+pub fn tray_template_unread_rgba(size: usize) -> Vec<u8> {
+    let mut rgba = tray_template_rgba(size);
+    let scale = size as f32;
+    let radius = scale * 0.2;
+    let ring = scale * 0.09;
+    let centre = (scale - radius - 0.5, radius + 0.5);
+    for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let x = (index % size) as f32 + 0.5;
+        let y = (index / size) as f32 + 0.5;
+        let distance = ((x - centre.0).powi(2) + (y - centre.1).powi(2)).sqrt();
+        // One pixel of soft edge on each boundary.
+        let dot = (radius + 0.5 - distance).clamp(0.0, 1.0);
+        let clear = (radius + ring + 0.5 - distance).clamp(0.0, 1.0);
+        let kept = f32::from(pixel[3]) * (1.0 - clear);
+        pixel[3] = (kept + 255.0 * dot).round().min(255.0) as u8;
+    }
+    rgba
+}
+
 #[cfg(test)]
 mod tests {
+    /// The unread mark is opaque at its centre and the ring around it is
+    /// clear, whatever the mark beneath.
+    #[test]
+    fn the_unread_tray_icon_has_a_dot_in_a_clear_ring() {
+        let size = 44;
+        let icon = super::tray_template_unread_rgba(size);
+        let alpha = |x: usize, y: usize| icon[(y * size + x) * 4 + 3];
+        let radius = size as f32 * 0.2;
+        let centre = (size as f32 - radius - 0.5, radius + 0.5);
+        assert_eq!(alpha(centre.0 as usize, centre.1 as usize), 255);
+        let ring = (centre.0 - radius - size as f32 * 0.045) as usize;
+        assert_eq!(alpha(ring, centre.1 as usize), 0);
+        assert_eq!(icon.len(), size * size * 4);
+    }
+
     #[test]
     fn a_call_length_reads_the_way_the_phone_shows_it() {
         assert_eq!(super::call_duration(0), "0:00");

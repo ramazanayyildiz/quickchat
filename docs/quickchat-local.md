@@ -34,7 +34,8 @@ Current pilot includes:
   Turkish accented names case-insensitively. Message contents are not indexed.
 - Locked conversations are excluded; unresolved privacy-ID-only contacts are
   not offered as new chats.
-- With an empty field the launcher lists recent chats; arrow keys wrap
+- With an empty field the launcher lists recent chats, unread ones first,
+  then pinned and favourite ones, then the rest, each newest first; arrow keys wrap
   around the list and Enter opens the selected conversation in a narrow
   panel at the right of the screen.
 - **Tab writes to the selected chat without opening it.** The launcher shows
@@ -55,6 +56,8 @@ Current pilot includes:
   (the full window, brought to the front), Lock and Quit. While the full
   window is open QuickChat has a Dock icon and appears in Cmd-Tab; with only
   the launcher, the panel or no window it is a menu-bar utility again.
+- The menu-bar icon carries a dot while any chat is unread, and its tooltip
+  gives the count: QuickChat has no Dock badge while it is a menu-bar utility.
 - A click on a macOS message notification requests the panel for that message.
 - Automatic/manual vendor application update installation is disabled in the fork.
 

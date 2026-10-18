@@ -67,6 +67,35 @@ impl App {
         }
     }
 
+    /// Marks the menu-bar icon while any chat is unread, as the Dock badge
+    /// would if QuickChat kept one, and names the count in its tooltip.
+    pub(crate) fn sync_quickchat_tray(&mut self) {
+        if !self.fork_mode {
+            return;
+        }
+        let unread = self.unread_chat_count_everywhere();
+        let shown = self.quickchat.tray_unread.replace(unread);
+        if shown == Some(unread) {
+            return;
+        }
+        let Some(tray) = self.tray.as_mut() else {
+            return;
+        };
+        if shown.is_none_or(|shown| (shown > 0) != (unread > 0)) {
+            let template: fastframe_tray::DrawIcon = if unread > 0 {
+                crate::util::tray_template_unread_rgba
+            } else {
+                crate::util::tray_template_rgba
+            };
+            tray.set_icon(crate::util::app_icon_rgba, Some(template));
+        }
+        tray.set_tooltip(match unread {
+            0 => "QuickChat".to_owned(),
+            1 => "QuickChat: 1 unread chat".to_owned(),
+            count => format!("QuickChat: {count} unread chats"),
+        });
+    }
+
     /// Saves the launcher shortcut and puts it into effect at once, along
     /// with the tray entry that names it.
     pub(crate) fn set_quickchat_shortcut(&mut self, shortcut: QuickShortcut) {

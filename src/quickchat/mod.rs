@@ -33,6 +33,9 @@ pub struct Hit {
     pub unread: u32,
     pub last_activity: i64,
     rank: u8,
+    /// Where an empty search lists it: unread chats first, then pinned and
+    /// favourite ones, then the rest. A typed name ignores it.
+    standing: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +61,9 @@ pub struct State {
     pub focus_message: bool,
     /// Whose text `message` is.
     last_compose: Option<(AccountId, String)>,
+    /// The unread chat count the menu-bar icon last showed. Not part of the
+    /// launcher, so hiding it keeps this.
+    pub(crate) tray_unread: Option<u32>,
 }
 
 impl Default for State {
@@ -72,6 +78,7 @@ impl Default for State {
             message: String::new(),
             focus_message: false,
             last_compose: None,
+            tray_unread: None,
         }
     }
 }
@@ -217,6 +224,13 @@ pub fn search_one(
             unread: chat.unread,
             last_activity: chat.last_activity,
             rank,
+            standing: if !words.is_empty() || chat.unread > 0 {
+                0
+            } else if chat.pinned || chat.favorite {
+                1
+            } else {
+                2
+            },
         });
     }
 
@@ -247,6 +261,7 @@ pub fn search_one(
                 unread: 0,
                 last_activity: 0,
                 rank,
+                standing: 0,
             });
         }
     }
@@ -266,6 +281,7 @@ pub fn search(accounts: &[Account], query: &str, limit: usize) -> Vec<Hit> {
     result.sort_by(|a, b| {
         a.rank
             .cmp(&b.rank)
+            .then_with(|| a.standing.cmp(&b.standing))
             .then_with(|| b.existing.cmp(&a.existing))
             .then_with(|| b.last_activity.cmp(&a.last_activity))
             .then_with(|| key(&a.name).cmp(&key(&b.name)))
@@ -309,6 +325,37 @@ mod tests {
         (chats, contacts)
     }
 
+    /// With nothing typed, unread chats lead, then pinned and favourite
+    /// ones, each newest first; the rest follow by recency.
+    #[test]
+    fn recent_chats_put_unread_then_pinned_first() {
+        let account = AccountId::first();
+        let chat = |id: &str, last_activity: i64| Chat {
+            last_activity,
+            ..Chat::new(format!("{id}@s.whatsapp.net"), id.to_owned())
+        };
+        let mut unread = chat("unread", 10);
+        unread.unread = 2;
+        let mut pinned = chat("pinned", 20);
+        pinned.pinned = true;
+        let mut favorite = chat("favorite", 30);
+        favorite.favorite = true;
+        let chats = vec![chat("old", 5), chat("new", 40), favorite, pinned, unread];
+        let mut hits = search_one(&account, &chats, &HashMap::new(), "");
+        hits.sort_by(|a, b| {
+            a.standing
+                .cmp(&b.standing)
+                .then_with(|| b.last_activity.cmp(&a.last_activity))
+        });
+        let names: Vec<_> = hits.iter().map(|hit| hit.name.as_str()).collect();
+        assert_eq!(names, ["unread", "favorite", "pinned", "new", "old"]);
+        // A typed name ranks by the match, not by standing.
+        assert!(
+            search_one(&account, &chats, &HashMap::new(), "o")
+                .iter()
+                .all(|hit| hit.standing == 0)
+        );
+    }
     #[test]
     fn name_query_prefills_only_search_and_reset_is_explicit() {
         let mut state = State::default();

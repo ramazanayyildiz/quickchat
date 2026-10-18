@@ -8554,6 +8554,7 @@ impl App {
         }
         #[cfg(all(target_os = "macos", feature = "quickchat"))]
         self.sync_quickchat_dock();
+        self.sync_quickchat_tray();
         #[cfg(target_os = "macos")]
         self.actions.extend(crate::macos::drain(self.window_hidden));
         self.handle_control_commands();
