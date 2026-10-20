@@ -6125,8 +6125,9 @@ impl Worker {
             Command::ReadForAgent {
                 chat,
                 limit,
+                since,
                 request,
-            } => self.read_for_agent(&chat, limit, request),
+            } => self.read_for_agent(&chat, limit, since, request),
             Command::EnsureChat { chat, name } => {
                 let is_new = self.archive.chat(&chat).ok().flatten().is_none();
                 if let Err(error) = self.archive.ensure_chat(&chat, &name) {
@@ -9122,11 +9123,12 @@ impl Worker {
     /// answered once content is shown instead of waiting forever.
     /// The chat's latest messages as plain lines for QuickChat's agent
     /// bridge. Names stand in for numbers, and nothing is marked read.
-    fn read_for_agent(&mut self, chat: &str, limit: usize, request: u64) {
+    fn read_for_agent(&mut self, chat: &str, limit: usize, since: Option<i64>, request: u64) {
         let result = if self.privacy_ready {
             match self.archive.messages(chat, None, limit) {
                 Ok(mut messages) => Ok(messages
                     .iter_mut()
+                    .filter(|message| since.is_none_or(|since| message.timestamp >= since))
                     .map(|message| {
                         self.polish(message);
                         self.transcript_line(message)
@@ -16778,6 +16780,34 @@ mod receipt_tests {
             worker.archive.meta("video_notes").unwrap().as_deref(),
             Some("1")
         );
+    }
+
+    /// A read for the agent bridge since a time leaves out what came
+    /// before it, and a plain read takes the latest messages as before.
+    #[test]
+    fn an_agent_read_since_a_time_leaves_out_earlier_messages() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        worker.privacy_ready = true;
+        worker
+            .archive
+            .upsert_chat(&Chat::new(PEER.to_owned(), "Fixture".to_owned()))
+            .unwrap();
+        for (id, time) in [("old", 100), ("start", 200), ("new", 300)] {
+            worker
+                .archive
+                .insert_message(&own_message(id, time), None)
+                .unwrap();
+        }
+        let times = |events: &std::sync::mpsc::Receiver<Event>| match events.try_recv() {
+            Ok(Event::AgentRead {
+                result: Ok(lines), ..
+            }) => lines.iter().map(|line| line.time).collect::<Vec<_>>(),
+            _ => panic!("the read is answered with lines"),
+        };
+        worker.read_for_agent(PEER, 10, Some(200), 1);
+        assert_eq!(times(&events), [200, 300]);
+        worker.read_for_agent(PEER, 2, None, 2);
+        assert_eq!(times(&events), [200, 300]);
     }
 
     pub(super) fn own_message(id: &str, timestamp: i64) -> Message {

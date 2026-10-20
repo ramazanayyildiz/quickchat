@@ -183,7 +183,10 @@ QuickChat enforces the limits itself, whatever the client is set to allow:
   it; locked, left and broadcast chats are never found. A name that fits
   several chats reads none and lists their names instead. A read returns at
   most 200 messages (50 unless asked), as plain lines with names for
-  numbers, and sends no read receipt.
+  numbers, and sends no read receipt. For "summarize today" Claude can ask
+  for every message since a time instead (`since`: `today`, `yesterday`, a
+  date, or a date and time, in your time zone): at most 500, and the answer
+  says when earlier ones were left out. The prompt shows the start time.
 - **A send needs the chat's whole name**, so a first name alone never picks
   a recipient. It sends plain text: names in it are not turned into
   mentions, and the open chat's composer and draft are left alone.

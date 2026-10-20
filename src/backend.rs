@@ -328,11 +328,13 @@ pub enum Command {
         request: u64,
     },
     /// Reads one chat's latest `limit` messages as plain lines for
-    /// QuickChat's agent bridge, after the person allowed it. Sends no
-    /// receipt and changes nothing; `request` comes back with the answer.
+    /// QuickChat's agent bridge, after the person allowed it, only those
+    /// from `since` (Unix seconds) on when it is set. Sends no receipt and
+    /// changes nothing; `request` comes back with the answer.
     ReadForAgent {
         chat: ChatId,
         limit: usize,
+        since: Option<i64>,
         request: u64,
     },
     /// Creates an archive chat before its first message is sent.

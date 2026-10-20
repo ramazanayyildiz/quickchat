@@ -896,11 +896,18 @@ pub fn agent_ask(app: &mut App, ui: &mut egui::Ui) {
                 palette.text,
             );
             let (allow, deny) = match &kind {
-                quickchat::agent::AskKind::Read { count } => {
+                quickchat::agent::AskKind::Read { count, since } => {
+                    let what = match since {
+                        Some(since) => format!(
+                            "This chat's messages since {}, at most {count},",
+                            quickchat::agent::local_time(*since)
+                        ),
+                        None => format!("The latest {count} messages of this chat"),
+                    };
                     theme::paragraph(
                         ui,
                         format!(
-                            "The latest {count} messages of this chat go to Claude, and so leave this Mac for Anthropic. Nothing else is read."
+                            "{what} go to Claude, and so leave this Mac for Anthropic. Nothing else is read."
                         ),
                         theme::regular(13.5),
                         palette.text,

@@ -3039,7 +3039,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.quickchat.search();
                 if let Some(hit) = crate::quickchat::search(&app.accounts, "", 1).pop() {
                     let kind = if part == "quick-agent-read" {
-                        AskKind::Read { count: 50 }
+                        AskKind::Read {
+                            count: 50,
+                            since: None,
+                        }
                     } else {
                         AskKind::Send {
                             text: "Running five minutes late, start without me".into(),
