@@ -6122,6 +6122,11 @@ impl Worker {
                 }
             }
             Command::ListChatShared { chat, request } => self.load_chat_media(chat, request),
+            Command::ReadForAgent {
+                chat,
+                limit,
+                request,
+            } => self.read_for_agent(&chat, limit, request),
             Command::EnsureChat { chat, name } => {
                 let is_new = self.archive.chat(&chat).ok().flatten().is_none();
                 if let Err(error) = self.archive.ensure_chat(&chat, &name) {
@@ -9115,6 +9120,68 @@ impl Worker {
     /// with why they could not be listed. A listing asked for while private
     /// content is withheld waits, as a transcript page does, so the panel is
     /// answered once content is shown instead of waiting forever.
+    /// The chat's latest messages as plain lines for QuickChat's agent
+    /// bridge. Names stand in for numbers, and nothing is marked read.
+    fn read_for_agent(&mut self, chat: &str, limit: usize, request: u64) {
+        let result = if self.privacy_ready {
+            match self.archive.messages(chat, None, limit) {
+                Ok(mut messages) => Ok(messages
+                    .iter_mut()
+                    .map(|message| {
+                        self.polish(message);
+                        self.transcript_line(message)
+                    })
+                    .collect()),
+                Err(error) => {
+                    log::warn!("could not read a chat for the agent: {error}");
+                    Err("QuickChat could not read the chat.".to_owned())
+                }
+            }
+        } else {
+            Err("QuickChat is still sorting out who is who. Try again in a minute.".to_owned())
+        };
+        self.emit(Event::AgentRead { request, result });
+    }
+
+    fn transcript_line(&self, message: &Message) -> crate::model::TranscriptLine {
+        let label = |id: &str, hint: Option<&str>, me: bool| {
+            if me || self.is_me(id) {
+                return "You".to_owned();
+            }
+            self.contact_name(&self.canonical_str(id))
+                .or_else(|| hint.map(str::to_owned))
+                .unwrap_or_else(|| "Unknown".to_owned())
+        };
+        let mut text = match &message.content {
+            Content::Text { text, .. } | Content::Interactive { text, .. } => text.clone(),
+            other => other.summary(),
+        };
+        for mention in &message.mentions {
+            let name = self
+                .contact_name(&self.canonical_str(&mention.id))
+                .unwrap_or_else(|| "someone".to_owned());
+            text = text.replace(&format!("@{}", mention.user), &format!("@{name}"));
+        }
+        if message.edited {
+            text.push_str(" (edited)");
+        }
+        crate::model::TranscriptLine {
+            time: message.timestamp,
+            sender: label(
+                &message.sender,
+                message.sender_name.as_deref(),
+                message.from_me,
+            ),
+            text,
+            reply_to: message.quoted.as_ref().map(|quoted| {
+                (
+                    label(&quoted.sender, quoted.sender_name.as_deref(), false),
+                    quoted.summary.clone(),
+                )
+            }),
+        }
+    }
+
     fn load_chat_media(&mut self, chat: ChatId, request: u64) {
         use crate::model::{ChatMedia, MEDIA_LIST_LIMIT};
         if self.withhold(WithheldPage::Media(chat.clone(), request)) {

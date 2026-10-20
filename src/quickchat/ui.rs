@@ -822,6 +822,133 @@ fn panel(app: &mut App, ui: &mut egui::Ui) {
         .show(ui, |ui| crate::ui::conversation::show(app, ui));
 }
 
+/// A request from the agent bridge, alone in the window until it is
+/// answered: what Claude wants, of which chat, and the exact text it would
+/// send. Escape denies; only a click or the focused button allows.
+pub fn agent_ask(app: &mut App, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    if app.quickchat_compact() {
+        place_window(app, &ctx);
+    }
+    let Some(ask) = app.agent.current() else {
+        return;
+    };
+    let (account, chat, name, kind) = (
+        ask.account.clone(),
+        ask.chat.clone(),
+        ask.name.clone(),
+        ask.kind.clone(),
+    );
+    let waiting = app.agent.asks.len() - 1;
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        app.actions.push(Action::AnswerAgent { allow: false });
+        return;
+    }
+    let palette = app.palette;
+    let several_accounts = app.accounts.len() > 1;
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(palette.window))
+        .show(ui, |ui| {
+            let (bar, _) = ui.allocate_exact_size(
+                vec2(ui.available_width(), theme::TOP_BAR_HEIGHT),
+                Sense::hover(),
+            );
+            crate::ui::titlebar_drag(ui, bar);
+            let inner = ui
+                .available_rect_before_wrap()
+                .shrink2(vec2(28.0, 8.0));
+            let mut child = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(inner)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            let ui = &mut child;
+            ui.spacing_mut().item_spacing.y = 10.0;
+            let heading = match kind {
+                quickchat::agent::AskKind::Read { .. } => "Claude wants to read a chat",
+                quickchat::agent::AskKind::Send { .. } => "Claude wants to send a message",
+            };
+            theme::text(ui, heading, theme::bold(18.0), palette.text);
+            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+            let avatar = Rect::from_min_size(row.min + vec2(0.0, 2.0), Vec2::splat(36.0));
+            let picture = app
+                .accounts
+                .iter_mut()
+                .find(|candidate| candidate.id == account)
+                .and_then(|candidate| candidate.avatar(&chat));
+            widgets::paint_avatar(ui, &palette, avatar, &name, &chat, picture.as_deref());
+            let title = if several_accounts {
+                format!("{name} · account {}", account.0)
+            } else {
+                name.clone()
+            };
+            let label = widgets::line(
+                ui,
+                &title,
+                theme::semibold(15.0),
+                palette.text,
+                (row.right() - avatar.right() - 12.0).max(0.0),
+                1,
+            );
+            label.paint(
+                ui,
+                pos2(avatar.right() + 12.0, row.center().y - label.size().y / 2.0),
+                palette.text,
+            );
+            let (allow, deny) = match &kind {
+                quickchat::agent::AskKind::Read { count } => {
+                    theme::paragraph(
+                        ui,
+                        format!(
+                            "The latest {count} messages of this chat go to Claude, and so leave this Mac for Anthropic. Nothing else is read."
+                        ),
+                        theme::regular(13.5),
+                        palette.text,
+                    );
+                    ("Allow", "Deny")
+                }
+                quickchat::agent::AskKind::Send { text } => {
+                    egui::Frame::new()
+                        .fill(palette.panel)
+                        .stroke(egui::Stroke::new(1.0, palette.outline))
+                        .corner_radius(theme::RADIUS)
+                        .inner_margin(12)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            egui::ScrollArea::vertical()
+                                .max_height((ui.available_height() - 120.0).clamp(60.0, 320.0))
+                                .show(ui, |ui| {
+                                    theme::paragraph(ui, text, theme::regular(14.5), palette.text);
+                                });
+                        });
+                    theme::paragraph(
+                        ui,
+                        "It goes out as you, exactly as shown, when you click Send.",
+                        theme::regular(13.0),
+                        palette.secondary,
+                    );
+                    ("Send", "Cancel")
+                }
+            };
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::pill_button(ui, &palette, allow, true).clicked() {
+                        app.actions.push(Action::AnswerAgent { allow: true });
+                    }
+                    if theme::pill_button(ui, &palette, deny, false).clicked() {
+                        app.actions.push(Action::AnswerAgent { allow: false });
+                    }
+                });
+            });
+            let mut hint = format!("esc {deny}    Unanswered requests are refused after 90 seconds.");
+            if waiting > 0 {
+                hint.push_str(&format!("    {waiting} more waiting"));
+            }
+            theme::paragraph(ui, hint, theme::regular(12.0), palette.dim);
+        });
+}
+
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     place_window(app, &ctx);

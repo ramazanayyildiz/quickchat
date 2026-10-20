@@ -29,6 +29,11 @@ struct Cli {
     /// Open Quick Search with a prefilled name, e.g. Raycast's "w ahmet".
     #[arg(long, value_name = "NAME", conflicts_with_all = ["quick", "target"], hide = !identity::QUICKCHAT)]
     quick_query: Option<String>,
+    /// Serve QuickChat's MCP tools on stdin and stdout for an MCP client
+    /// such as Claude Code. Each read and send waits for Allow in QuickChat.
+    #[cfg(all(unix, feature = "quickchat"))]
+    #[arg(long, conflicts_with_all = ["quick", "chats", "quick_query", "target", "start_hidden"])]
+    mcp: bool,
 
     /// Start with offline sample chats.
     #[cfg(feature = "demo")]
@@ -215,6 +220,12 @@ fn run() -> eframe::Result<()> {
     let launch = fastframe_update::intercept(&zapfast::updates::CONFIG);
     let cli = Cli::parse_from(&launch.arguments);
     let discovered = paths::AppDirs::discover();
+    // The MCP server only talks to the running QuickChat over its agent
+    // socket: it never starts one, takes no lock, and writes only JSON-RPC.
+    #[cfg(all(unix, feature = "quickchat"))]
+    if cli.mcp {
+        std::process::exit(zapfast::quickchat::agent::mcp::serve(&discovered.runtime));
+    }
     // A control command only talks to the running copy: whatever the answer,
     // it never starts ZapFast and never stops a process itself.
     if let Some(command) = &cli.command {

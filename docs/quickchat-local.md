@@ -153,6 +153,49 @@ not notarized: that matters only for copies downloaded on other Macs.
 The Raycast script prefers this installed copy when QuickChat is not
 running; a running QuickChat takes the request whichever copy sends it.
 
+## Let Claude read a chat or send a message (MCP)
+
+QuickChat can answer an MCP client such as Claude Code: "summarize the
+Family group" or "tell Ahmet Yılmaz I'm on my way". It is off until you turn
+on **Settings > System > Let Claude use QuickChat**, and register it once:
+
+```sh
+claude mcp add quickchat -- ~/Applications/QuickChat.app/Contents/MacOS/quickchat --mcp
+```
+
+`quickchat --mcp` is a small stdio process with two tools, `read_chat` and
+`send_message`. It holds no WhatsApp session and opens no file: each call
+goes over a private socket (`agent.sock` in QuickChat's runtime folder, mode
+0600) to the running QuickChat, which listens only while the setting is on.
+When QuickChat is not running, the tools say so and nothing starts. A tool
+call waits for your answer in QuickChat for up to 90 seconds; if Claude Code
+gives up sooner, start it with a longer MCP timeout, such as
+`MCP_TOOL_TIMEOUT=150000 claude`.
+
+QuickChat enforces the limits itself, whatever the client is set to allow:
+
+- **Every request asks in QuickChat.** A read shows the chat and how many
+  messages; a send shows the recipient and the exact text. Nothing is read
+  or sent until you click **Allow** or **Send**. Escape, **Deny**, the app
+  lock, turning the setting off, or 90 seconds without an answer refuse it.
+  The window opens for the question and hides again after the last answer.
+- **One named chat per read.** The name is matched as the launcher matches
+  it; locked, left and broadcast chats are never found. A name that fits
+  several chats reads none and lists their names instead. A read returns at
+  most 200 messages (50 unless asked), as plain lines with names for
+  numbers, and sends no read receipt.
+- **A send needs the chat's whole name**, so a first name alone never picks
+  a recipient. It sends plain text: names in it are not turned into
+  mentions, and the open chat's composer and draft are left alone.
+
+What you allow Claude to read leaves your Mac with Claude's request to
+Anthropic. That is the one exception to "nothing leaves the Mac" above, and
+it only happens with your click. Messages people send you can contain text
+written to steer an assistant; the tools mark chat contents as data, and the
+QuickChat prompt is what stops a send you did not ask for. Keep sends to
+single messages you dictated: automated or bulk sending from an unofficial
+client puts the WhatsApp account at risk.
+
 ## Upgrading from the first pilot
 
 The pilot used the bundle identifier `app.quickchat.desktop`; QuickChat now

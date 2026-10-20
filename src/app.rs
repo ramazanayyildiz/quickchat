@@ -785,6 +785,8 @@ pub struct App {
     pub window_hidden: bool,
     /// Ephemeral QuickChat launcher/panel state. No contacts or messages are persisted here.
     pub quickchat: crate::quickchat::State,
+    /// QuickChat's agent bridge: requests waiting for Allow, and its socket.
+    pub(crate) agent: crate::quickchat::agent::Bridge,
     /// QuickChat must not receive or install ZapFast's signed release binaries.
     pub(crate) fork_mode: bool,
     #[cfg(all(target_os = "macos", feature = "quickchat"))]
@@ -1214,6 +1216,8 @@ impl App {
     /// Single-instance guard used by later launches.
     pub fn set_remote_control(&mut self, guard: &Guard) {
         self.control_commands = Some(guard.commands());
+        // Only the running instance answers the agent bridge.
+        self.agent.may_listen = true;
     }
 
     /// Creates a disconnected app and event sender for demos and tests.
@@ -1492,6 +1496,7 @@ impl App {
             tray_lockable,
             window_hidden: false,
             quickchat: crate::quickchat::State::default(),
+            agent: crate::quickchat::agent::Bridge::default(),
             fork_mode: false,
             #[cfg(all(target_os = "macos", feature = "quickchat"))]
             quickchat_hotkey: None,
@@ -3363,6 +3368,9 @@ impl App {
                     }
                 }
             }
+            // Answers a read the person allowed; it touches no window state,
+            // so a hidden account's answer is taken as a shown one's.
+            Event::AgentRead { request, result } => self.agent_read(request, result),
             Event::ChatShared { request, result } => {
                 // Only the answer to the request being waited for counts:
                 // an earlier request's, or one for a chat the panel no
@@ -8314,6 +8322,7 @@ impl App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Action::QuickSearchMessages(query) => self.search_quick_messages(query),
+            Action::AnswerAgent { allow } => self.answer_agent(allow),
             Action::QuickSend {
                 account,
                 chat,
@@ -8563,6 +8572,7 @@ impl App {
         #[cfg(target_os = "macos")]
         self.actions.extend(crate::macos::drain(self.window_hidden));
         self.handle_control_commands();
+        self.sync_agent_bridge(ctx);
         self.poll_custom_themes();
         let wallpaper = self.account().settings.wallpaper_image.clone();
         self.wallpaper_image.sync(wallpaper.as_deref(), &self.waker);

@@ -47,6 +47,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         window_chrome(app, ui);
         return;
     }
+    // A request from QuickChat's agent bridge takes the whole window until
+    // it is answered, so no list, shortcut or dialog beneath acts on it.
+    if app.agent.current().is_some() {
+        crate::quickchat::ui::agent_ask(app, ui);
+        focus_ring(app, ctx);
+        window_chrome(app, ui);
+        return;
+    }
     // Connecting alone is not a paired WhatsApp device. The first-run
     // shortcut must reveal onboarding, not a blank search or narrow panel.
     if app.quickchat_needs_link() {

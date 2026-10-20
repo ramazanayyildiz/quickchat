@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub mod agent;
 #[cfg(all(target_os = "macos", feature = "quickchat"))]
 pub(crate) mod dock;
 mod hooks;

@@ -3030,6 +3030,24 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 hits.sort_by_key(|message| std::cmp::Reverse(message.timestamp));
                 app.quick_hits = hits;
             }
+            "quick-agent-read" | "quick-agent-send" => {
+                // The agent bridge asking to read the sample's first chat,
+                // or to send it a message. The answer goes nowhere.
+                use crate::quickchat::agent::AskKind;
+                app.enable_quickchat_fork();
+                app.settings.quickchat_agent = true;
+                app.quickchat.search();
+                if let Some(hit) = crate::quickchat::search(&app.accounts, "", 1).pop() {
+                    let kind = if part == "quick-agent-read" {
+                        AskKind::Read { count: 50 }
+                    } else {
+                        AskKind::Send {
+                            text: "Running five minutes late, start without me".into(),
+                        }
+                    };
+                    app.agent.ask_for_demo(hit, kind);
+                }
+            }
             "quick-panel" => {
                 // QuickChat's one-chat panel over the sample's first chat.
                 app.enable_quickchat_fork();
@@ -5908,6 +5926,8 @@ mod tests {
             "quick-compose",
             "quick-messages",
             "quick-panel",
+            "quick-agent-read",
+            "quick-agent-send",
         ] {
             let mut app = app();
             let ctx = egui::Context::default();
@@ -5915,6 +5935,35 @@ mod tests {
             apply_flags(&mut app, Some(page));
             render(&mut app, &ctx);
             assert!(app.quickchat_compact(), "{page}");
+        }
+    }
+
+    /// Enter never allows an agent request, and Escape denies it.
+    #[test]
+    fn quickchat_agent_requests_need_a_click() {
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for page in ["quick-agent-read", "quick-agent-send"] {
+            let mut app = app();
+            let ctx = egui::Context::default();
+            app.attach(&ctx);
+            apply_flags(&mut app, Some(page));
+            render(&mut app, &ctx);
+            let (open, mode) = (app.open_chat.clone(), app.quickchat.mode);
+            frame_with(&mut app, &ctx, vec![key(egui::Key::Enter)]);
+            assert!(app.agent.current().is_some(), "{page}");
+            assert_eq!(
+                (app.open_chat.clone(), app.quickchat.mode),
+                (open, mode),
+                "{page}"
+            );
+            frame_with(&mut app, &ctx, vec![key(egui::Key::Escape)]);
+            assert!(app.agent.current().is_none(), "{page}");
         }
     }
 

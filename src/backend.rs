@@ -327,6 +327,14 @@ pub enum Command {
         chat: ChatId,
         request: u64,
     },
+    /// Reads one chat's latest `limit` messages as plain lines for
+    /// QuickChat's agent bridge, after the person allowed it. Sends no
+    /// receipt and changes nothing; `request` comes back with the answer.
+    ReadForAgent {
+        chat: ChatId,
+        limit: usize,
+        request: u64,
+    },
     /// Creates an archive chat before its first message is sent.
     EnsureChat {
         chat: ChatId,
@@ -1040,6 +1048,12 @@ pub enum Event {
     ChatShared {
         request: u64,
         result: Result<crate::model::ChatMedia, String>,
+    },
+    /// Answers `Command::ReadForAgent`: the chat's lines, oldest first, or
+    /// why they could not be read.
+    AgentRead {
+        request: u64,
+        result: Result<Vec<crate::model::TranscriptLine>, String>,
     },
     /// What the info panel lists for a chat changed in the archive: a
     /// picture, a video, a document or a linked text was filed, imported,

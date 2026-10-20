@@ -553,6 +553,18 @@ pub struct ChatLink {
 /// list can be told apart from a cut one.
 pub const MEDIA_LIST_LIMIT: usize = 500;
 
+/// One message as QuickChat's agent bridge hands it over: who wrote it, when,
+/// and what it says, never ids, numbers or file paths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptLine {
+    /// Unix seconds.
+    pub time: i64,
+    pub sender: String,
+    pub text: String,
+    /// The sender and first line of the message this one replies to.
+    pub reply_to: Option<(String, String)>,
+}
+
 /// What the info panel lists for one chat: its pictures and videos, its
 /// documents, and the web links in its text, each newest first.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2236,6 +2248,10 @@ pub enum Action {
         account: AccountId,
         chat: ChatId,
         text: String,
+    },
+    /// The person's answer to the agent bridge's request on screen.
+    AnswerAgent {
+        allow: bool,
     },
     /// Opens settings, or closes them when they are already showing.
     ToggleSettings,

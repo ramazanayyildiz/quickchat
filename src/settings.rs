@@ -574,6 +574,9 @@ pub struct Settings {
     pub app_lock_after: AutoLock,
     /// QuickChat's launcher shortcut; ZapFast has no launcher and ignores it.
     pub quickchat_shortcut: QuickShortcut,
+    /// Whether QuickChat answers its agent bridge (`quickchat --mcp`), which
+    /// still asks before every read and send. Off until turned on.
+    pub quickchat_agent: bool,
     /// Last window width in logical pixels (points at zoom 1), remembered
     /// across restarts; see [`fastframe_shell::window::Geometry`]. `None`
     /// uses the default size.
@@ -642,6 +645,7 @@ impl Default for Settings {
             app_lock_hash: None,
             app_lock_after: AutoLock::default(),
             quickchat_shortcut: QuickShortcut::default(),
+            quickchat_agent: false,
             window_width: None,
             window_height: None,
             window_x: None,

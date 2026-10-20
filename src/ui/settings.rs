@@ -705,6 +705,14 @@ fn sections(app: &App) -> Vec<Section> {
                 theme::reveal_focus(&response.response);
             },
         );
+        system.toggle(
+            translated(locale, "Let Claude use QuickChat"),
+            translated(
+                locale,
+                "Claude Code may ask to read a chat you name or to send a message. QuickChat asks you first every time; what you allow it to read goes to Anthropic.",
+            ),
+            |settings| &mut settings.quickchat_agent,
+        );
     }
     // QuickChat turns updates off; ZapFast's releases are not its own.
     if !app.fork_mode {
